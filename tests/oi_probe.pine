@@ -18,8 +18,6 @@ plot(futOI, "Futures OI", color = color.blue)
 
 var label l = na
 if barstate.islast
-    txt = "CE price: " + (na(ceC) ? "NOT FOUND — check symbol" : str.tostring(ceC)) +
-     "\nCE option OI: " + (na(ceOI) ? "NOT AVAILABLE" : str.tostring(ceOI, "#")) +
-     "\nFutures OI: " + (na(futOI) ? "NOT AVAILABLE" : str.tostring(futOI, "#"))
+    txt = "CE price: " + (na(ceC) ? "NOT FOUND — check symbol" : str.tostring(ceC)) + "\nCE option OI: " + (na(ceOI) ? "NOT AVAILABLE" : str.tostring(ceOI, "#")) + "\nFutures OI: " + (na(futOI) ? "NOT AVAILABLE" : str.tostring(futOI, "#"))
     label.delete(l)
     l := label.new(bar_index, 0, txt, style = label.style_label_left, textcolor = color.white, color = color.new(#263238, 0))
