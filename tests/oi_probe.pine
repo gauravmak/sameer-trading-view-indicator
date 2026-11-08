@@ -1,23 +1,17 @@
 //@version=6
-// OI probe — paste into the Pine editor and add to any chart.
-// Tells you whether TradingView exposes open interest for an NSE option contract
-// via the "_OI" synthetic symbol, which the main indicator relies on for "Option OI" mode.
-// Update the two symbols to a live ATM contract first (format: NSE:NIFTYyymmddCstrike).
+// OI probe — does TradingView expose open interest for an NSE option contract via "<symbol>_OI"?
+// Add to any chart, then set the CE symbol in Settings to a live ATM contract (format NSE:NIFTYyymmddCstrike).
+// Zero indented lines on purpose, so it survives pasting from a phone browser.
 indicator("OPP OI probe", overlay = false)
-
 ceSym = input.string("NSE:NIFTY251111C25500", "CE symbol")
 futSym = input.string("NSE:NIFTY1!", "Futures symbol")
-
-ceC   = request.security(ceSym, timeframe.period, close, ignore_invalid_symbol = true)
-ceOI  = request.security(ceSym + "_OI", timeframe.period, close, ignore_invalid_symbol = true)
+ceC = request.security(ceSym, timeframe.period, close, ignore_invalid_symbol = true)
+ceOI = request.security(ceSym + "_OI", timeframe.period, close, ignore_invalid_symbol = true)
 futOI = request.security(futSym + "_OI", timeframe.period, close, ignore_invalid_symbol = true)
-
 plot(ceC, "CE close", color = color.green)
 plot(ceOI, "CE OI", color = color.orange)
 plot(futOI, "Futures OI", color = color.blue)
-
-var label l = na
-if barstate.islast
-    txt = "CE price: " + (na(ceC) ? "NOT FOUND — check symbol" : str.tostring(ceC)) + "\nCE option OI: " + (na(ceOI) ? "NOT AVAILABLE" : str.tostring(ceOI, "#")) + "\nFutures OI: " + (na(futOI) ? "NOT AVAILABLE" : str.tostring(futOI, "#"))
-    label.delete(l)
-    l := label.new(bar_index, 0, txt, style = label.style_label_left, textcolor = color.white, color = color.new(#263238, 0))
+txt = "CE price: " + (na(ceC) ? "NOT FOUND — check symbol" : str.tostring(ceC)) + "\nCE option OI: " + (na(ceOI) ? "NOT AVAILABLE" : str.tostring(ceOI, "#")) + "\nFutures OI: " + (na(futOI) ? "NOT AVAILABLE" : str.tostring(futOI, "#"))
+var label l = label.new(bar_index, 0, "", style = label.style_label_left, textcolor = color.white, color = color.new(#263238, 0))
+label.set_xy(l, bar_index, 0)
+label.set_text(l, txt)
