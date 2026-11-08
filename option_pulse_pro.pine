@@ -1,0 +1,281 @@
+//@version=6
+// Option Pulse Pro (rebuild) — CE/PE premium vs. zone + open-interest confirmation.
+// Add this to a 1-minute chart of the underlying index (e.g. NSE:NIFTY, NSE:BANKNIFTY).
+//
+// Logic (mirrors the public description of the original):
+//   LONG SETUP     : CE premium above its zone AND PE premium below its zone, OI confirms bullish
+//   SHORT SETUP    : PE premium above its zone AND CE premium below its zone, OI confirms bearish
+//   PREMIUM DECAY  : CE and PE both below their zones -> avoid trading
+//   NEUTRAL        : anything else
+//
+// The "zone" of the original indicator is proprietary. Here it is configurable
+// (VWAP band / opening range / EMA band) so it can be tuned to match.
+indicator("Option Pulse Pro (rebuild)", shorttitle = "OPP", overlay = false, max_bars_back = 500)
+
+// ───────────────────────── Inputs: underlying & contracts ─────────────────────────
+grpU = "Underlying & contracts"
+rootIn     = input.string("Auto", "Underlying", options = ["Auto", "NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "Custom"], group = grpU)
+customRoot = input.string("NIFTY", "Custom root (used when Underlying = Custom)", group = grpU)
+exchIn     = input.string("Auto", "Exchange prefix", options = ["Auto", "NSE", "BSE", "MCX"], group = grpU)
+stepIn     = input.float(0, "Strike step (0 = auto)", minval = 0, group = grpU)
+atmOffset  = input.int(0, "Strike offset from ATM (+1 = one strike OTM for both legs)", group = grpU)
+expiryMode = input.string("Auto", "Expiry date", options = ["Auto", "Manual"], group = grpU)
+expiryKind = input.string("Auto", "Expiry cycle", options = ["Auto", "Weekly", "Monthly"], group = grpU)
+expiryDow  = input.string("Auto", "Expiry weekday", options = ["Auto", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday"], group = grpU)
+manExpiry  = input.string("", "Manual expiry as YYMMDD (e.g. 251111)", group = grpU)
+symFmt     = input.string("{EX}:{ROOT}{YY}{MM}{DD}{CP}{STRIKE}", "Symbol format", group = grpU,
+     tooltip = "Tokens: {EX} {ROOT} {YY} {MM} {DD} {MON} {CP} {CEPE} {STRIKE}. TradingView NSE format example: NSE:NIFTY251028C26000")
+manCE      = input.string("", "Manual CE symbol (overrides auto)", group = grpU)
+manPE      = input.string("", "Manual PE symbol (overrides auto)", group = grpU)
+
+// ───────────────────────── Inputs: zone ─────────────────────────
+grpZ = "Zone (computed on each option's own premium)"
+zoneMethod = input.string("VWAP band", "Zone method", options = ["VWAP band", "Opening range", "EMA band"], group = grpZ)
+vwapMult   = input.float(1.0, "VWAP band: standard-deviation multiplier", step = 0.25, minval = 0, group = grpZ)
+orMinutes  = input.int(15, "Opening range: minutes", minval = 1, group = grpZ)
+emaLen     = input.int(20, "EMA band: length", minval = 1, group = grpZ)
+emaAtrMult = input.float(0.5, "EMA band: ATR multiplier", step = 0.1, minval = 0, group = grpZ)
+
+// ───────────────────────── Inputs: open interest ─────────────────────────
+grpO = "Open-interest confirmation"
+oiSource   = input.string("Futures OI", "Confirm with", options = ["Futures OI", "Option OI", "None"], group = grpO,
+     tooltip = "Futures OI: NIFTY1! open interest (confirmed available on TradingView). Option OI: OI of the CE/PE contracts themselves (may not be available). None: zone only.")
+oiLookback = input.int(5, "OI / price change lookback (bars)", minval = 1, group = grpO)
+futSuffix  = input.string("1!", "Futures contract suffix", group = grpO)
+
+// ───────────────────────── Inputs: display ─────────────────────────
+grpD = "Display"
+showTable  = input.bool(true, "Show dashboard table", group = grpD)
+tablePos   = input.string("Top right", "Table position", options = ["Top right", "Top left", "Bottom right", "Bottom left"], group = grpD)
+showBg     = input.bool(true, "Colour background by state", group = grpD)
+showZones  = input.bool(true, "Draw zone bands", group = grpD)
+
+// ───────────────────────── Constants & helpers ─────────────────────────
+TZ = "Asia/Kolkata"
+MS_DAY = 86400000
+
+pad2(int n) =>
+    (n < 10 ? "0" : "") + str.tostring(n)
+
+monthName(int m) =>
+    names = array.from("JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC")
+    array.get(names, m - 1)
+
+dowNum(string s) =>
+    s == "Monday" ? dayofweek.monday : s == "Tuesday" ? dayofweek.tuesday : s == "Wednesday" ? dayofweek.wednesday : s == "Thursday" ? dayofweek.thursday : dayofweek.friday
+
+pastMarketClose(int t) =>
+    hour(t, TZ) > 15 or (hour(t, TZ) == 15 and minute(t, TZ) >= 30)
+
+// Next weekly expiry on the wanted weekday, measured from the real clock (timenow),
+// so the chosen contract is the same on every bar.
+nextWeeklyExpiry(int dowWant) =>
+    now = timenow
+    ahead = (dowWant - dayofweek(now, TZ) + 7) % 7
+    ahead := ahead == 0 and pastMarketClose(now) ? 7 : ahead
+    now + ahead * MS_DAY
+
+lastDowOfMonth(int y, int m, int dowWant) =>
+    ny = m == 12 ? y + 1 : y
+    nm = m == 12 ? 1 : m + 1
+    lastDay = timestamp(TZ, ny, nm, 1, 12, 0, 0) - MS_DAY
+    back = (dayofweek(lastDay, TZ) - dowWant + 7) % 7
+    lastDay - back * MS_DAY
+
+nextMonthlyExpiry(int dowWant) =>
+    now = timenow
+    y = year(now, TZ)
+    m = month(now, TZ)
+    e = lastDowOfMonth(y, m, dowWant)
+    sameDay = dayofmonth(e, TZ) == dayofmonth(now, TZ) and month(e, TZ) == month(now, TZ)
+    expired = (e < now and not sameDay) or (sameDay and pastMarketClose(now))
+    if expired
+        e := lastDowOfMonth(m == 12 ? y + 1 : y, m == 12 ? 1 : m + 1, dowWant)
+    e
+
+// ───────────────────────── Resolve underlying ─────────────────────────
+tk = str.upper(syminfo.ticker)
+autoRoot = str.contains(tk, "BANKNIFTY") ? "BANKNIFTY" :
+     str.contains(tk, "FINNIFTY") ? "FINNIFTY" :
+     str.contains(tk, "MIDCPNIFTY") ? "MIDCPNIFTY" :
+     str.contains(tk, "SENSEX") ? "SENSEX" :
+     str.contains(tk, "NIFTY") ? "NIFTY" : tk
+root = rootIn == "Auto" ? autoRoot : rootIn == "Custom" ? customRoot : rootIn
+
+autoEx = root == "SENSEX" ? "BSE" : (rootIn == "Custom" ? syminfo.prefix : "NSE")
+ex = exchIn == "Auto" ? autoEx : exchIn
+
+autoStep = root == "BANKNIFTY" ? 100.0 : root == "SENSEX" ? 100.0 : root == "MIDCPNIFTY" ? 25.0 : 50.0
+step = stepIn > 0 ? stepIn : autoStep
+
+// Expiry defaults as of late 2025: NSE index weeklies on Tuesday (only NIFTY has weeklies),
+// BANKNIFTY monthly on the last Tuesday, SENSEX weekly on Thursday. All overridable.
+autoKind = root == "BANKNIFTY" or root == "FINNIFTY" or root == "MIDCPNIFTY" ? "Monthly" : "Weekly"
+kind = expiryKind == "Auto" ? autoKind : expiryKind
+autoDow = root == "SENSEX" ? dayofweek.thursday : dayofweek.tuesday
+dow = expiryDow == "Auto" ? autoDow : dowNum(expiryDow)
+
+expTs = kind == "Monthly" ? nextMonthlyExpiry(dow) : nextWeeklyExpiry(dow)
+useManualExpiry = expiryMode == "Manual" and str.length(manExpiry) == 6
+eYY = useManualExpiry ? int(str.tonumber(str.substring(manExpiry, 0, 2))) : year(expTs, TZ) % 100
+eMM = useManualExpiry ? int(str.tonumber(str.substring(manExpiry, 2, 4))) : month(expTs, TZ)
+eDD = useManualExpiry ? int(str.tonumber(str.substring(manExpiry, 4, 6))) : dayofmonth(expTs, TZ)
+
+// Reference price for the ATM strike: the current month's close with lookahead on,
+// i.e. the latest traded price, identical on every bar of this month. This keeps the
+// number of distinct option symbols small (dynamic requests are capped at 40).
+refPrice = request.security(syminfo.tickerid, "1M", close, lookahead = barmerge.lookahead_on)
+atmStrike = math.round(refPrice / step) * step + atmOffset * step
+
+buildSym(string cp) =>
+    s = symFmt
+    s := str.replace_all(s, "{EX}", ex)
+    s := str.replace_all(s, "{ROOT}", root)
+    s := str.replace_all(s, "{YY}", pad2(eYY))
+    s := str.replace_all(s, "{MM}", pad2(eMM))
+    s := str.replace_all(s, "{DD}", pad2(eDD))
+    s := str.replace_all(s, "{MON}", monthName(eMM))
+    s := str.replace_all(s, "{CP}", cp)
+    s := str.replace_all(s, "{CEPE}", cp == "C" ? "CE" : "PE")
+    s := str.replace_all(s, "{STRIKE}", str.tostring(atmStrike, "#"))
+    s
+
+ceSym = manCE != "" ? manCE : buildSym("C")
+peSym = manPE != "" ? manPE : buildSym("P")
+futSym = ex + ":" + root + futSuffix
+
+// ───────────────────────── Zone, evaluated inside each option's context ─────────────────────────
+f_zone() =>
+    newDay = timeframe.change("1D")
+    var int sessStart = na
+    if newDay
+        sessStart := time
+    [vw, vUp, vLo] = ta.vwap(hlc3, newDay, vwapMult)
+    var float orH = na
+    var float orL = na
+    if newDay
+        orH := high
+        orL := low
+    else if not na(sessStart) and time - sessStart < orMinutes * 60000
+        orH := math.max(nz(orH, high), high)
+        orL := math.min(nz(orL, low), low)
+    e = ta.ema(close, emaLen)
+    a = ta.atr(emaLen)
+    top = zoneMethod == "VWAP band" ? vUp : zoneMethod == "Opening range" ? orH : e + a * emaAtrMult
+    bot = zoneMethod == "VWAP band" ? vLo : zoneMethod == "Opening range" ? orL : e - a * emaAtrMult
+    [close, top, bot, volume]
+
+[ceC, ceTop, ceBot, ceVol] = request.security(ceSym, timeframe.period, f_zone(), ignore_invalid_symbol = true)
+[peC, peTop, peBot, peVol] = request.security(peSym, timeframe.period, f_zone(), ignore_invalid_symbol = true)
+
+// ───────────────────────── Open interest ─────────────────────────
+ceOI  = request.security(ceSym + "_OI", timeframe.period, close, ignore_invalid_symbol = true)
+peOI  = request.security(peSym + "_OI", timeframe.period, close, ignore_invalid_symbol = true)
+futC  = request.security(futSym, timeframe.period, close, ignore_invalid_symbol = true)
+futOI = request.security(futSym + "_OI", timeframe.period, close, ignore_invalid_symbol = true)
+
+oiClass(float p, float oi) =>
+    dp  = p - p[oiLookback]
+    doi = oi - oi[oiLookback]
+    na(dp) or na(doi) ? "n/a" :
+     dp > 0 and doi > 0 ? "Long buildup" :
+     dp > 0 and doi < 0 ? "Short covering" :
+     dp < 0 and doi > 0 ? "Short buildup" :
+     dp < 0 and doi < 0 ? "Long unwinding" : "Flat"
+
+ceClass  = oiClass(ceC, ceOI)
+peClass  = oiClass(peC, peOI)
+futClass = oiClass(futC, futOI)
+
+// Bullish OI: futures long buildup / short covering; or call long buildup / put writing.
+bullOI = oiSource == "None" ? true :
+     oiSource == "Futures OI" ? (futClass == "Long buildup" or futClass == "Short covering") :
+     (ceClass == "Long buildup" or peClass == "Short buildup")
+bearOI = oiSource == "None" ? true :
+     oiSource == "Futures OI" ? (futClass == "Short buildup" or futClass == "Long unwinding") :
+     (peClass == "Long buildup" or ceClass == "Short buildup")
+oiAvailable = oiSource == "None" ? true : oiSource == "Futures OI" ? not na(futOI) : not na(ceOI) and not na(peOI)
+
+// ───────────────────────── State ─────────────────────────
+posOf(float c, float top, float bot) =>
+    na(c) or na(top) or na(bot) ? 0 : c > top ? 1 : c < bot ? -1 : 0
+
+cePos = posOf(ceC, ceTop, ceBot)
+pePos = posOf(peC, peTop, peBot)
+
+zoneBias = cePos == 1 and pePos == -1 ? 1 : pePos == 1 and cePos == -1 ? -1 : cePos == -1 and pePos == -1 ? 2 : 0
+
+state = zoneBias == 1 and bullOI ? "LONG SETUP" :
+     zoneBias == -1 and bearOI ? "SHORT SETUP" :
+     zoneBias == 2 ? "PREMIUM DECAY" :
+     zoneBias == 1 ? "LONG (no OI confirm)" :
+     zoneBias == -1 ? "SHORT (no OI confirm)" : "NEUTRAL"
+
+colLong  = color.new(#26a69a, 0)
+colShort = color.new(#ef5350, 0)
+colDecay = color.new(#9e9e9e, 0)
+stateCol = state == "LONG SETUP" ? colLong : state == "SHORT SETUP" ? colShort : state == "PREMIUM DECAY" ? colDecay :
+     zoneBias == 1 ? color.new(#26a69a, 50) : zoneBias == -1 ? color.new(#ef5350, 50) : color.new(#607d8b, 60)
+
+// ───────────────────────── Plots ─────────────────────────
+plot(ceC, "CE premium", color = colLong, linewidth = 2)
+plot(peC, "PE premium", color = colShort, linewidth = 2)
+pCeT = plot(showZones ? ceTop : na, "CE zone top", color = color.new(#26a69a, 60))
+pCeB = plot(showZones ? ceBot : na, "CE zone bottom", color = color.new(#26a69a, 60))
+pPeT = plot(showZones ? peTop : na, "PE zone top", color = color.new(#ef5350, 60))
+pPeB = plot(showZones ? peBot : na, "PE zone bottom", color = color.new(#ef5350, 60))
+fill(pCeT, pCeB, color = color.new(#26a69a, 88), title = "CE zone")
+fill(pPeT, pPeB, color = color.new(#ef5350, 88), title = "PE zone")
+bgcolor(showBg ? color.new(stateCol, 85) : na, title = "State background")
+
+// ───────────────────────── Dashboard ─────────────────────────
+posText(int p) => p == 1 ? "Above zone" : p == -1 ? "Below zone" : "Inside zone"
+fmt(float v) => na(v) ? "n/a" : str.tostring(v, format.mintick)
+fmtOI(float v) => na(v) ? "n/a" : str.tostring(v, "#")
+
+tPos = tablePos == "Top right" ? position.top_right : tablePos == "Top left" ? position.top_left : tablePos == "Bottom right" ? position.bottom_right : position.bottom_left
+var table dash = table.new(tPos, 3, 10, border_width = 1, border_color = color.new(#000000, 70))
+
+if showTable and barstate.islast
+    hdrBg = color.new(#263238, 0)
+    txt = color.white
+    cellBg = color.new(#37474f, 20)
+    table.cell(dash, 0, 0, "Option Pulse Pro (rebuild)", text_color = txt, bgcolor = hdrBg, text_size = size.small)
+    table.merge_cells(dash, 0, 0, 2, 0)
+    table.cell(dash, 0, 1, "", bgcolor = hdrBg, text_size = size.small)
+    table.cell(dash, 1, 1, "CE", text_color = colLong, bgcolor = hdrBg, text_size = size.small)
+    table.cell(dash, 2, 1, "PE", text_color = colShort, bgcolor = hdrBg, text_size = size.small)
+    table.cell(dash, 0, 2, "Symbol", text_color = txt, bgcolor = cellBg, text_size = size.small)
+    table.cell(dash, 1, 2, ceSym, text_color = txt, bgcolor = cellBg, text_size = size.small)
+    table.cell(dash, 2, 2, peSym, text_color = txt, bgcolor = cellBg, text_size = size.small)
+    table.cell(dash, 0, 3, "Premium", text_color = txt, bgcolor = cellBg, text_size = size.small)
+    table.cell(dash, 1, 3, fmt(ceC), text_color = txt, bgcolor = cellBg, text_size = size.small)
+    table.cell(dash, 2, 3, fmt(peC), text_color = txt, bgcolor = cellBg, text_size = size.small)
+    table.cell(dash, 0, 4, "Zone", text_color = txt, bgcolor = cellBg, text_size = size.small)
+    table.cell(dash, 1, 4, fmt(ceBot) + " – " + fmt(ceTop), text_color = txt, bgcolor = cellBg, text_size = size.small)
+    table.cell(dash, 2, 4, fmt(peBot) + " – " + fmt(peTop), text_color = txt, bgcolor = cellBg, text_size = size.small)
+    table.cell(dash, 0, 5, "Position", text_color = txt, bgcolor = cellBg, text_size = size.small)
+    table.cell(dash, 1, 5, posText(cePos), text_color = cePos == 1 ? colLong : cePos == -1 ? colShort : txt, bgcolor = cellBg, text_size = size.small)
+    table.cell(dash, 2, 5, posText(pePos), text_color = pePos == 1 ? colLong : pePos == -1 ? colShort : txt, bgcolor = cellBg, text_size = size.small)
+    table.cell(dash, 0, 6, "Option OI", text_color = txt, bgcolor = cellBg, text_size = size.small)
+    table.cell(dash, 1, 6, fmtOI(ceOI) + " · " + ceClass, text_color = txt, bgcolor = cellBg, text_size = size.small)
+    table.cell(dash, 2, 6, fmtOI(peOI) + " · " + peClass, text_color = txt, bgcolor = cellBg, text_size = size.small)
+    table.cell(dash, 0, 7, "Futures", text_color = txt, bgcolor = cellBg, text_size = size.small)
+    table.cell(dash, 1, 7, futSym + "  " + fmt(futC), text_color = txt, bgcolor = cellBg, text_size = size.small)
+    table.cell(dash, 2, 7, fmtOI(futOI) + " · " + futClass, text_color = txt, bgcolor = cellBg, text_size = size.small)
+    table.cell(dash, 0, 8, "Expiry / ATM", text_color = txt, bgcolor = cellBg, text_size = size.small)
+    table.cell(dash, 1, 8, "20" + pad2(eYY) + "-" + pad2(eMM) + "-" + pad2(eDD), text_color = txt, bgcolor = cellBg, text_size = size.small)
+    table.cell(dash, 2, 8, str.tostring(atmStrike, "#") + (oiAvailable ? "" : "  (OI n/a)"), text_color = txt, bgcolor = cellBg, text_size = size.small)
+    table.cell(dash, 0, 9, "STATE", text_color = txt, bgcolor = hdrBg, text_size = size.small)
+    table.cell(dash, 1, 9, state, text_color = color.white, bgcolor = stateCol, text_size = size.normal)
+    table.merge_cells(dash, 1, 9, 2, 9)
+
+// ───────────────────────── Alerts ─────────────────────────
+stateChanged = state != state[1]
+alertcondition(stateChanged and state == "LONG SETUP", "OPP: Long setup", "Option Pulse Pro: LONG SETUP")
+alertcondition(stateChanged and state == "SHORT SETUP", "OPP: Short setup", "Option Pulse Pro: SHORT SETUP")
+alertcondition(stateChanged and state == "PREMIUM DECAY", "OPP: Premium decay", "Option Pulse Pro: PREMIUM DECAY — avoid")
+alertcondition(stateChanged, "OPP: Any state change", "Option Pulse Pro: state changed")
+
+if stateChanged and barstate.isconfirmed
+    alert("OPP " + syminfo.ticker + " [" + timeframe.period + "]: " + state + " | CE " + ceSym + " " + fmt(ceC) + " (" + posText(cePos) + ") | PE " + peSym + " " + fmt(peC) + " (" + posText(pePos) + ") | Fut OI: " + futClass, alert.freq_once_per_bar_close)
