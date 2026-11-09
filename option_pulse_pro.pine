@@ -3,8 +3,9 @@
 // Components mirror the original:
 //   Institutional Breakout Zone  = anchored VWAP (green), anchored to the first bar of the contract's loaded data
 //                                  (this matched the paid indicator to within 0.1 on 9 Nov 2026)
-//   Main Trend - ITM             = smooth Supertrend trailing line (blue below price = bullish, pink above = bearish)
-//                                  ATR is measured over N-bar spans (default 5 = "5-minute" volatility on a 1-minute chart)
+//   Main Trend - ITM             = volume-weighted centre (elastic VWMA) ± factor × ATR, shown as the lower band while
+//                                  bullish (blue) and the upper band while bearish (pink); flips when close crosses it.
+//                                  Fitted to the paid indicator's exported values on 9 Nov 2026 (EVWMA 65, ATR 14, factor 2).
 //   Running Trend - Pullback Zone = fast EMA pair with cloud (green when fast > slow, pink otherwise)
 //   Today's High/Low lines (optional), background colour
 // Extra: finds the opposite leg (same strike & expiry, CE<->PE) and shows the combined CE/PE state with futures OI.
@@ -15,15 +16,15 @@ indicator("Option Pulse Pro (rebuild)", shorttitle = "OPP", overlay = true, scal
 grpM = "Main settings"
 showInst = input.bool(true, "Institutional Breakout Zone (anchored VWAP)", group = grpM)
 instAnchor = input.string("Contract", "VWAP anchor", options = ["Contract", "Session", "Week", "Month"], group = grpM)
-showMain = input.bool(true, "Main Trend - ITM (Supertrend)", group = grpM)
-stSpan = input.int(5, "Supertrend ATR span (chart bars per range, 5 = 5-minute volatility)", minval = 1, group = grpM)
-stAtr = input.int(10, "Supertrend ATR period (in spans)", minval = 1, group = grpM)
-stFactor = input.float(2.0, "Supertrend factor", minval = 0.1, step = 0.1, group = grpM)
+showMain = input.bool(true, "Main Trend - ITM (volume-weighted band)", group = grpM)
+mtLen = input.int(65, "Main Trend length (elastic VWMA)", minval = 1, group = grpM)
+mtAtr = input.int(14, "Main Trend ATR period", minval = 1, group = grpM)
+mtFactor = input.float(2.0, "Main Trend ATR factor", minval = 0.1, step = 0.1, group = grpM)
 showRun = input.bool(true, "Running Trend - Pullback Zone (EMA pair + cloud)", group = grpM)
 runFast = input.int(9, "Running Trend fast EMA", minval = 1, group = grpM)
 runSlow = input.int(21, "Running Trend slow EMA", minval = 1, group = grpM)
 showHL = input.bool(false, "Today's High/Low lines", group = grpM)
-zoneRef = input.string("Institutional VWAP", "Above/below zone is judged against", options = ["Institutional VWAP", "Main Trend (Supertrend)", "Running Trend cloud"], group = grpM)
+zoneRef = input.string("Institutional VWAP", "Above/below zone is judged against", options = ["Institutional VWAP", "Main Trend", "Running Trend cloud"], group = grpM)
 grpP = "Opposite leg"
 autoPair = input.bool(true, "Auto-detect opposite leg from chart symbol", group = grpP)
 manPartner = input.string("", "Manual opposite-leg symbol (overrides)", group = grpP)
@@ -70,18 +71,16 @@ futSym = syminfo.prefix + ":" + root + futSuffix
 newDay = timeframe.change("1D")
 anchorNow = instAnchor == "Contract" ? bar_index == 0 : instAnchor == "Session" ? newDay : instAnchor == "Week" ? timeframe.change("1W") : timeframe.change("1M")
 inst = ta.vwap(hlc3, anchorNow)
-trN = math.max(ta.highest(high, stSpan), nz(close[stSpan], close)) - math.min(ta.lowest(low, stSpan), nz(close[stSpan], close))
-atrN = ta.rma(trN, stAtr * stSpan)
-upB = hl2 + stFactor * atrN
-loB = hl2 - stFactor * atrN
-var float fLoB = na
-var float fUpB = na
-var int stDirI = 1
-fLoB := na(fLoB[1]) ? loB : (loB > fLoB[1] or close[1] < fLoB[1]) ? loB : fLoB[1]
-fUpB := na(fUpB[1]) ? upB : (upB < fUpB[1] or close[1] > fUpB[1]) ? upB : fUpB[1]
-stDirI := na(atrN[1]) ? 1 : stDirI[1] == -1 ? (close < fLoB ? 1 : -1) : (close > fUpB ? -1 : 1)
-stDir = float(stDirI)
-stLine = stDirI == -1 ? fLoB : fUpB
+vSum = math.sum(volume, mtLen)
+var float mtCen = na
+mtCen := na(mtCen[1]) ? close : vSum > 0 ? mtCen[1] * (vSum - volume) / vSum + volume * close / vSum : mtCen[1]
+mtAtrV = ta.atr(mtAtr)
+mtUp = mtCen + mtFactor * mtAtrV
+mtLo = mtCen - mtFactor * mtAtrV
+var int mtDirI = 1
+mtDirI := nz(mtDirI[1], 1) == 1 and close > mtUp ? -1 : nz(mtDirI[1], 1) == -1 and close < mtLo ? 1 : nz(mtDirI[1], 1)
+stDir = float(mtDirI)
+stLine = mtDirI == -1 ? mtLo : mtUp
 runF = ta.ema(close, runFast)
 runS = ta.ema(close, runSlow)
 runUp = runF > runS
@@ -89,24 +88,22 @@ var float dayH = na
 var float dayL = na
 dayH := newDay ? high : math.max(nz(dayH, high), high)
 dayL := newDay ? low : math.min(nz(dayL, low), low)
-thisPos = zoneRef == "Institutional VWAP" ? posLine(close, inst) : zoneRef == "Main Trend (Supertrend)" ? posDir(stDir) : posBand(close, runF, runS)
+thisPos = zoneRef == "Institutional VWAP" ? posLine(close, inst) : zoneRef == "Main Trend" ? posDir(stDir) : posBand(close, runF, runS)
 
 // ───────── Opposite leg (same maths on its own chart; Heikin Ashi if this chart is) ─────────
-[pC, pH, pL, pInst, pRunF, pRunS] = request.security(partnerReq, timeframe.period, [close, high, low, ta.vwap(hlc3, anchorNow), ta.ema(close, runFast), ta.ema(close, runSlow)], ignore_invalid_symbol = true)
-pTrN = math.max(ta.highest(pH, stSpan), nz(pC[stSpan], pC)) - math.min(ta.lowest(pL, stSpan), nz(pC[stSpan], pC))
-pAtrN = ta.rma(pTrN, stAtr * stSpan)
-pHl2 = (pH + pL) / 2
-pUpB = pHl2 + stFactor * pAtrN
-pLoB = pHl2 - stFactor * pAtrN
-var float pfLoB = na
-var float pfUpB = na
-var int pStDirI = 1
-pfLoB := na(pfLoB[1]) ? pLoB : (pLoB > pfLoB[1] or pC[1] < pfLoB[1]) ? pLoB : pfLoB[1]
-pfUpB := na(pfUpB[1]) ? pUpB : (pUpB < pfUpB[1] or pC[1] > pfUpB[1]) ? pUpB : pfUpB[1]
-pStDirI := na(pAtrN[1]) ? 1 : pStDirI[1] == -1 ? (pC < pfLoB ? 1 : -1) : (pC > pfUpB ? -1 : 1)
-pStDir = float(pStDirI)
-pStLine = pStDirI == -1 ? pfLoB : pfUpB
-partnerPos = not hasPartner ? 0 : zoneRef == "Institutional VWAP" ? posLine(pC, pInst) : zoneRef == "Main Trend (Supertrend)" ? posDir(pStDir) : posBand(pC, pRunF, pRunS)
+[pC, pH, pL, pV, pInst, pRunF, pRunS] = request.security(partnerReq, timeframe.period, [close, high, low, volume, ta.vwap(hlc3, anchorNow), ta.ema(close, runFast), ta.ema(close, runSlow)], ignore_invalid_symbol = true)
+pVsum = math.sum(nz(pV), mtLen)
+var float pCen = na
+pCen := na(pCen[1]) ? pC : pVsum > 0 ? pCen[1] * (pVsum - nz(pV)) / pVsum + nz(pV) * pC / pVsum : pCen[1]
+pTR = math.max(pH - pL, math.abs(pH - nz(pC[1], pC)), math.abs(pL - nz(pC[1], pC)))
+pAtrV = ta.rma(pTR, mtAtr)
+pUp = pCen + mtFactor * pAtrV
+pLo = pCen - mtFactor * pAtrV
+var int pDirI = 1
+pDirI := nz(pDirI[1], 1) == 1 and pC > pUp ? -1 : nz(pDirI[1], 1) == -1 and pC < pLo ? 1 : nz(pDirI[1], 1)
+pStDir = float(pDirI)
+pStLine = pDirI == -1 ? pLo : pUp
+partnerPos = not hasPartner ? 0 : zoneRef == "Institutional VWAP" ? posLine(pC, pInst) : zoneRef == "Main Trend" ? posDir(pStDir) : posBand(pC, pRunF, pRunS)
 
 // ───────── Futures open interest ─────────
 futC = request.security(futSym, timeframe.period, close, ignore_invalid_symbol = true)
@@ -162,7 +159,7 @@ table.cell(dash, 2, 1, showTable ? (hasPartner ? partnerSym : "not detected") : 
 table.cell(dash, 0, 2, showTable ? "Premium / VWAP" : "", text_color = tc, bgcolor = cb, text_size = size.small)
 table.cell(dash, 1, 2, showTable ? fmt(close) + " / " + fmt(inst) : "", text_color = tc, bgcolor = cb, text_size = size.small)
 table.cell(dash, 2, 2, showTable ? (hasPartner ? fmt(pC) + " / " + fmt(pInst) : "-") : "", text_color = tc, bgcolor = cb, text_size = size.small)
-table.cell(dash, 0, 3, showTable ? "Supertrend" : "", text_color = tc, bgcolor = cb, text_size = size.small)
+table.cell(dash, 0, 3, showTable ? "Main Trend" : "", text_color = tc, bgcolor = cb, text_size = size.small)
 table.cell(dash, 1, 3, showTable ? (stDir < 0 ? "Bullish" : "Bearish") + " " + fmt(stLine) : "", text_color = showTable ? (stDir < 0 ? colUp : colDn) : hide, bgcolor = cb, text_size = size.small)
 table.cell(dash, 2, 3, showTable ? (hasPartner ? (pStDir < 0 ? "Bullish" : "Bearish") + " " + fmt(pStLine) : "-") : "", text_color = showTable ? (pStDir < 0 ? colUp : colDn) : hide, bgcolor = cb, text_size = size.small)
 table.cell(dash, 0, 4, showTable ? "Position" : "", text_color = tc, bgcolor = cb, text_size = size.small)
