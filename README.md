@@ -14,7 +14,7 @@ The original's formulas are not public. From side-by-side screenshots the green 
 
 ## Files
 
-- `option_pulse_pro.pine` — **overlay replica**. Add it to the option contract's own chart (e.g. `NSE:NIFTY261117C24900`, 1-minute), exactly like the original. Components, matched to the paid indicator's behaviour: Institutional Breakout Zone = anchored VWAP (green, anchored to the start of the contract's data), Main Trend - ITM = smooth Supertrend trailing line (blue below price, pink above; ATR measured over 5-bar spans, period 10, factor 2), Running Trend - Pullback Zone = EMA 9/21 cloud, optional Today's High/Low, background colour. It auto-detects the opposite leg (same strike and expiry, CE↔PE), follows Heikin Ashi if the chart uses it, and shows the combined CE/PE state with futures OI in a small table.
+- `option_pulse_pro.pine` — **overlay replica**. Add it to the option contract's own chart (e.g. `NSE:NIFTY261117C24900`, 1-minute), exactly like the original. Components, matched to the paid indicator's behaviour: Institutional Breakout Zone = anchored VWAP (green, anchored to the contract's first trading day; stable when scrolling), Main Trend - ITM = smooth Supertrend trailing line (blue below price, pink above; ATR measured over 5-bar spans, period 10, factor 2), Running Trend - Pullback Zone = EMA 9/21 cloud, optional Today's High/Low, background colour. It auto-detects the opposite leg (same strike and expiry, CE↔PE), follows Heikin Ashi if the chart uses it, and shows the combined CE/PE state with futures OI in a small table.
 - `option_pulse_dashboard.pine` — **one-pane dashboard**. Add it to the index chart (`NSE:NIFTY`) or to any option chart of it; it picks the ATM CE and PE for the current expiry and shows both premiums, their zones, OI and the state.
 - `tests/oi_probe.pine` — tiny check: does TradingView expose open interest for an NSE option contract? (The dashboard's "Option OI" row answers the same question.)
 
@@ -46,6 +46,6 @@ Both scripts expose alert conditions (Long setup, Short setup, Premium decay, An
 ## Known gaps vs. the original
 
 - Supertrend settings (5-bar span, ATR 10, factor 2) and EMA 9/21 are fitted to screenshots of the paid indicator; the anchored VWAP matched to within 0.1. Compare the overlay with the paid one on the same chart and tune in Settings until the lines sit on top of each other.
-- The anchored VWAP depends on how much history TradingView loads for the contract; the paid line likely has the same dependency.
+- The contract-anchored VWAP uses the daily series for completed days plus intraday bars for today, so it does not shift when more history loads.
 - MCX Gold/Crude options: symbol format on TradingView not verified; use manual symbols.
 - Needs real-time NSE data on TradingView (delayed data = 15-minute-late signals on a 1-minute chart).
