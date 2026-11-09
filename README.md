@@ -14,7 +14,7 @@ The original's zone formula is proprietary, so here the zone is **configurable**
 
 ## Files
 
-- `option_pulse_pro.pine` — **overlay replica**. Add it to the option contract's own chart (e.g. `NSE:NIFTY261117C24900`, 1-minute), exactly like the original. Draws Main Trend (slow EMA), Running Trend / Pullback Zone (fast EMA + cloud), Institutional Breakout Zone (stepped swing high/low), optional Today's High/Low, background colour. It also auto-detects the opposite leg (same strike and expiry, CE↔PE) and shows the combined CE/PE state and OI in a small table.
+- `option_pulse_pro.pine` — **overlay replica**. Add it to the option contract's own chart (e.g. `NSE:NIFTY261117C24900`, 1-minute), exactly like the original. Draws Institutional Zone (slow EMA, default 200, orange), Main Trend - ITM (slower EMA, default 500, purple), Running Trend / Pullback Zone (EMA 9/21 pair with cloud, cyan), optional swing levels and Today's High/Low, and a background colour. It auto-detects the opposite leg (same strike and expiry, CE↔PE), follows Heikin Ashi if the chart uses it, and shows the combined CE/PE state with futures OI in a small table. Colours differ from the original on purpose so both can be compared on one chart.
 - `option_pulse_dashboard.pine` — **one-pane dashboard**. Add it to the index chart (`NSE:NIFTY`) or to any option chart of it; it picks the ATM CE and PE for the current expiry and shows both premiums, their zones, OI and the state.
 - `tests/oi_probe.pine` — tiny check: does TradingView expose open interest for an NSE option contract? (The dashboard's "Option OI" row answers the same question.)
 
@@ -37,19 +37,10 @@ If the dashboard shows `n/a` for the premium, the built symbol is wrong. Search 
 
 ## Open interest
 
-Pine gets OI through a synthetic `<symbol>_OI` series. This is confirmed for NSE futures (`NSE:NIFTY1!_OI`) and **unconfirmed for individual option contracts**. Run `tests/oi_probe.pine` once:
-
-- If "CE option OI" shows a number → set *Confirm with = Option OI* in the main indicator.
-- If it says NOT AVAILABLE → keep the default *Futures OI*.
-
-TradingView refreshes OI only every few minutes, so OI confirmation lags the price.
-
-## Alerts
-
-Four alert conditions: Long setup, Short setup, Premium decay, Any state change. The script also fires a dynamic `alert()` message with the symbols and OI reading on each state change (use "Any alert() function call" when creating the alert).
+Pine gets OI through a synthetic `<symbol>_OI` series. Tested 9 Nov 2026: available for NSE futures (`NSE:NIFTY1!_OI`), **not available for individual NSE option contracts**. So the setups are confirmed with futures OI (long buildup / short covering = bullish, short buildup / long unwinding = bearish). TradingView refreshes OI only every few minutes, so it lags the price.
 
 ## Known gaps vs. the original
 
-- Line lengths (EMA 20/50, swing length 10) are guesses. Compare the overlay with the paid one on the same chart and tune the lengths in Settings until the lines sit on top of each other.
+- EMA lengths (200 / 500 / 9 & 21) are a best guess from screenshots. Compare the overlay with the paid one on the same chart and tune the lengths in Settings until the lines sit on top of each other.
 - MCX Gold/Crude options: symbol format on TradingView not verified; use manual symbols.
 - Needs real-time NSE data on TradingView (delayed data = 15-minute-late signals on a 1-minute chart).

@@ -247,9 +247,3 @@ table.cell(dash, 0, 8, "STATE", text_color = txtC, bgcolor = hdrBg, text_size = 
 table.cell(dash, 1, 8, state, text_color = color.white, bgcolor = stateCol, text_size = size.normal)
 table.cell(dash, 2, 8, "", bgcolor = stateCol, text_size = size.normal)
 
-// ───────── Alerts ─────────
-stateChanged = state != state[1]
-alertcondition(stateChanged and state == "LONG SETUP", "OPP: Long setup", "Option Pulse Pro {{ticker}} {{interval}}: LONG SETUP")
-alertcondition(stateChanged and state == "SHORT SETUP", "OPP: Short setup", "Option Pulse Pro {{ticker}} {{interval}}: SHORT SETUP")
-alertcondition(stateChanged and state == "PREMIUM DECAY", "OPP: Premium decay", "Option Pulse Pro {{ticker}} {{interval}}: PREMIUM DECAY — avoid")
-alertcondition(stateChanged, "OPP: Any state change", "Option Pulse Pro {{ticker}} {{interval}}: state changed")
