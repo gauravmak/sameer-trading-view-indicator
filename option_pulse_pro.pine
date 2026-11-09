@@ -1,8 +1,8 @@
 //@version=6
 // Option Pulse Pro (rebuild) — OVERLAY for an option contract's own chart (e.g. NSE:NIFTY261117C24900, 1-minute).
 // Components mirror the original:
-//   Institutional Breakout Zone  = anchored VWAP (green), anchored to the contract's first trading day by default
-//                                  (completed days come from the daily series, so the line does not change when you scroll)
+//   Institutional Breakout Zone  = anchored VWAP (green), anchored to the first bar of the contract's loaded data
+//                                  (this matched the paid indicator to within 0.1 on 9 Nov 2026)
 //   Main Trend - ITM             = smooth Supertrend trailing line (blue below price = bullish, pink above = bearish)
 //                                  ATR is measured over N-bar spans (default 5 = "5-minute" volatility on a 1-minute chart)
 //   Running Trend - Pullback Zone = fast EMA pair with cloud (green when fast > slow, pink otherwise)
@@ -68,15 +68,8 @@ futSym = syminfo.prefix + ":" + root + futSuffix
 
 // ───────── This leg ─────────
 newDay = timeframe.change("1D")
-anchorNow = instAnchor == "Session" ? newDay : instAnchor == "Week" ? timeframe.change("1W") : timeframe.change("1M")
-vwPeriodic = ta.vwap(hlc3, anchorNow)
-[dPV, dV] = request.security(stdId, "D", [nz(ta.cum(hlc3 * volume)[1]), nz(ta.cum(volume)[1])], lookahead = barmerge.lookahead_on, ignore_invalid_symbol = true)
-var float tPV = 0.0
-var float tV = 0.0
-tPV := newDay ? hlc3 * volume : tPV + hlc3 * volume
-tV := newDay ? volume : tV + volume
-vwContract = (nz(dPV) + tPV) / (nz(dV) + tV)
-inst = instAnchor == "Contract" ? vwContract : vwPeriodic
+anchorNow = instAnchor == "Contract" ? bar_index == 0 : instAnchor == "Session" ? newDay : instAnchor == "Week" ? timeframe.change("1W") : timeframe.change("1M")
+inst = ta.vwap(hlc3, anchorNow)
 trN = math.max(ta.highest(high, stSpan), nz(close[stSpan], close)) - math.min(ta.lowest(low, stSpan), nz(close[stSpan], close))
 atrN = ta.rma(trN, stAtr * stSpan)
 upB = hl2 + stFactor * atrN
@@ -99,14 +92,7 @@ dayL := newDay ? low : math.min(nz(dayL, low), low)
 thisPos = zoneRef == "Institutional VWAP" ? posLine(close, inst) : zoneRef == "Main Trend (Supertrend)" ? posDir(stDir) : posBand(close, runF, runS)
 
 // ───────── Opposite leg (same maths on its own chart; Heikin Ashi if this chart is) ─────────
-[pC, pH, pL, pV, pInstPer, pRunF, pRunS] = request.security(partnerReq, timeframe.period, [close, high, low, volume, ta.vwap(hlc3, anchorNow), ta.ema(close, runFast), ta.ema(close, runSlow)], ignore_invalid_symbol = true)
-[pdPV, pdV] = request.security(partnerSym, "D", [nz(ta.cum(hlc3 * volume)[1]), nz(ta.cum(volume)[1])], lookahead = barmerge.lookahead_on, ignore_invalid_symbol = true)
-pHLC3 = (pH + pL + pC) / 3
-var float ptPV = 0.0
-var float ptV = 0.0
-ptPV := newDay ? nz(pHLC3 * pV) : ptPV + nz(pHLC3 * pV)
-ptV := newDay ? nz(pV) : ptV + nz(pV)
-pInst = instAnchor == "Contract" ? (nz(pdPV) + ptPV) / (nz(pdV) + ptV) : pInstPer
+[pC, pH, pL, pInst, pRunF, pRunS] = request.security(partnerReq, timeframe.period, [close, high, low, ta.vwap(hlc3, anchorNow), ta.ema(close, runFast), ta.ema(close, runSlow)], ignore_invalid_symbol = true)
 pTrN = math.max(ta.highest(pH, stSpan), nz(pC[stSpan], pC)) - math.min(ta.lowest(pL, stSpan), nz(pC[stSpan], pC))
 pAtrN = ta.rma(pTrN, stAtr * stSpan)
 pHl2 = (pH + pL) / 2
