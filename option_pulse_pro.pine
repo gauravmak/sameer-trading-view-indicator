@@ -2,7 +2,8 @@
 // Option Pulse Pro (rebuild) — OVERLAY for an option contract's own chart (e.g. NSE:NIFTY261117C24900, 1-minute).
 // Components mirror the original:
 //   Institutional Breakout Zone  = anchored VWAP (green), anchored to the start of the contract's data by default
-//   Main Trend - ITM             = Supertrend trailing line (blue below price = bullish, pink above price = bearish)
+//   Main Trend - ITM             = smooth Supertrend trailing line (blue below price = bullish, pink above = bearish)
+//                                  ATR is measured over N-bar spans (default 5 = "5-minute" volatility on a 1-minute chart)
 //   Running Trend - Pullback Zone = fast EMA pair with cloud (green when fast > slow, pink otherwise)
 //   Today's High/Low lines (optional), background colour
 // Extra: finds the opposite leg (same strike & expiry, CE<->PE) and shows the combined CE/PE state with futures OI.
@@ -14,9 +15,9 @@ grpM = "Main settings"
 showInst = input.bool(true, "Institutional Breakout Zone (anchored VWAP)", group = grpM)
 instAnchor = input.string("All data", "VWAP anchor", options = ["All data", "Session", "Week", "Month"], group = grpM)
 showMain = input.bool(true, "Main Trend - ITM (Supertrend)", group = grpM)
-stTf = input.timeframe("5", "Supertrend timeframe", group = grpM)
-stAtr = input.int(10, "Supertrend ATR period", minval = 1, group = grpM)
-stFactor = input.float(3.0, "Supertrend factor", minval = 0.1, step = 0.1, group = grpM)
+stSpan = input.int(5, "Supertrend ATR span (chart bars per range, 5 = 5-minute volatility)", minval = 1, group = grpM)
+stAtr = input.int(10, "Supertrend ATR period (in spans)", minval = 1, group = grpM)
+stFactor = input.float(2.0, "Supertrend factor", minval = 0.1, step = 0.1, group = grpM)
 showRun = input.bool(true, "Running Trend - Pullback Zone (EMA pair + cloud)", group = grpM)
 runFast = input.int(9, "Running Trend fast EMA", minval = 1, group = grpM)
 runSlow = input.int(21, "Running Trend slow EMA", minval = 1, group = grpM)
@@ -30,7 +31,7 @@ useFutOI = input.bool(true, "Confirm setups with futures OI", group = grpO)
 oiLookback = input.int(5, "OI / price change lookback (bars)", minval = 1, group = grpO)
 futSuffix = input.string("1!", "Futures contract suffix", group = grpO)
 grpD = "Display"
-showBg = input.bool(true, "Background colour", group = grpD)
+showBg = input.bool(false, "Background colour", group = grpD)
 showLabel = input.bool(true, "Pane label", group = grpD)
 showTable = input.bool(true, "CE/PE table", group = grpD)
 tablePos = input.string("Top right", "Table position", options = ["Top right", "Top left", "Bottom right", "Bottom left"], group = grpD)
@@ -63,12 +64,22 @@ hasPartner = manPartner != "" or (autoPair and isOpt)
 autoRoot = str.contains(tkRaw, "BANKNIFTY") ? "BANKNIFTY" : str.contains(tkRaw, "FINNIFTY") ? "FINNIFTY" : str.contains(tkRaw, "MIDCPNIFTY") ? "MIDCPNIFTY" : str.contains(tkRaw, "SENSEX") ? "SENSEX" : str.contains(tkRaw, "NIFTY") ? "NIFTY" : tkRaw
 root = isOpt ? optRoot : autoRoot
 futSym = syminfo.prefix + ":" + root + futSuffix
-stTfUse = stTf == "" ? timeframe.period : stTf
 
 // ───────── This leg ─────────
 anchorNow = instAnchor == "All data" ? bar_index == 0 : instAnchor == "Session" ? timeframe.change("1D") : instAnchor == "Week" ? timeframe.change("1W") : timeframe.change("1M")
 inst = ta.vwap(hlc3, anchorNow)
-[stLine, stDir] = request.security(syminfo.tickerid, stTfUse, ta.supertrend(stFactor, stAtr), ignore_invalid_symbol = true)
+trN = math.max(ta.highest(high, stSpan), nz(close[stSpan], close)) - math.min(ta.lowest(low, stSpan), nz(close[stSpan], close))
+atrN = ta.rma(trN, stAtr * stSpan)
+upB = hl2 + stFactor * atrN
+loB = hl2 - stFactor * atrN
+var float fLoB = na
+var float fUpB = na
+var int stDirI = 1
+fLoB := na(fLoB[1]) ? loB : (loB > fLoB[1] or close[1] < fLoB[1]) ? loB : fLoB[1]
+fUpB := na(fUpB[1]) ? upB : (upB < fUpB[1] or close[1] > fUpB[1]) ? upB : fUpB[1]
+stDirI := na(atrN[1]) ? 1 : stDirI[1] == -1 ? (close < fLoB ? 1 : -1) : (close > fUpB ? -1 : 1)
+stDir = float(stDirI)
+stLine = stDirI == -1 ? fLoB : fUpB
 runF = ta.ema(close, runFast)
 runS = ta.ema(close, runSlow)
 runUp = runF > runS
@@ -80,8 +91,20 @@ dayL := newDay ? low : math.min(nz(dayL, low), low)
 thisPos = zoneRef == "Institutional VWAP" ? posLine(close, inst) : zoneRef == "Main Trend (Supertrend)" ? posDir(stDir) : posBand(close, runF, runS)
 
 // ───────── Opposite leg (same maths on its own chart; Heikin Ashi if this chart is) ─────────
-[pC, pInst, pRunF, pRunS] = request.security(partnerReq, timeframe.period, [close, ta.vwap(hlc3, anchorNow), ta.ema(close, runFast), ta.ema(close, runSlow)], ignore_invalid_symbol = true)
-[pStLine, pStDir] = request.security(partnerReq, stTfUse, ta.supertrend(stFactor, stAtr), ignore_invalid_symbol = true)
+[pC, pH, pL, pInst, pRunF, pRunS] = request.security(partnerReq, timeframe.period, [close, high, low, ta.vwap(hlc3, anchorNow), ta.ema(close, runFast), ta.ema(close, runSlow)], ignore_invalid_symbol = true)
+pTrN = math.max(ta.highest(pH, stSpan), nz(pC[stSpan], pC)) - math.min(ta.lowest(pL, stSpan), nz(pC[stSpan], pC))
+pAtrN = ta.rma(pTrN, stAtr * stSpan)
+pHl2 = (pH + pL) / 2
+pUpB = pHl2 + stFactor * pAtrN
+pLoB = pHl2 - stFactor * pAtrN
+var float pfLoB = na
+var float pfUpB = na
+var int pStDirI = 1
+pfLoB := na(pfLoB[1]) ? pLoB : (pLoB > pfLoB[1] or pC[1] < pfLoB[1]) ? pLoB : pfLoB[1]
+pfUpB := na(pfUpB[1]) ? pUpB : (pUpB < pfUpB[1] or pC[1] > pfUpB[1]) ? pUpB : pfUpB[1]
+pStDirI := na(pAtrN[1]) ? 1 : pStDirI[1] == -1 ? (pC < pfLoB ? 1 : -1) : (pC > pfUpB ? -1 : 1)
+pStDir = float(pStDirI)
+pStLine = pStDirI == -1 ? pfLoB : pfUpB
 partnerPos = not hasPartner ? 0 : zoneRef == "Institutional VWAP" ? posLine(pC, pInst) : zoneRef == "Main Trend (Supertrend)" ? posDir(pStDir) : posBand(pC, pRunF, pRunS)
 
 // ───────── Futures open interest ─────────
