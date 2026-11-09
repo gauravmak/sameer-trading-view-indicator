@@ -9,7 +9,7 @@
 //   Today's High/Low lines (optional), background colour
 // Extra: finds the opposite leg (same strike & expiry, CE<->PE) and shows the combined CE/PE state with futures OI.
 // Zero indented lines on purpose, so it survives pasting from a phone browser.
-indicator("Option Pulse Pro (rebuild)", shorttitle = "OPP", overlay = true, max_bars_back = 1000)
+indicator("Option Pulse Pro (rebuild)", shorttitle = "OPP", overlay = true, scale = scale.right, max_bars_back = 1000)
 
 // ───────── Inputs ─────────
 grpM = "Main settings"
