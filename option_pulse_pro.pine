@@ -98,9 +98,9 @@ colGrey = color.new(#9e9e9e, 0)
 stateCol = state == "LONG SETUP" ? colUp : state == "SHORT SETUP" ? colDn : state == "PREMIUM DECAY" ? colGrey : zoneBias == 1 ? color.new(#26a69a, 40) : zoneBias == -1 ? color.new(#ef5350, 40) : thisPos == 1 ? color.new(#26a69a, 40) : thisPos == -1 ? color.new(#ef5350, 40) : color.new(#607d8b, 50)
 
 // ───────── Drawing ─────────
-pSlow = plot(showMain ? slow : na, "Main Trend", color = color.new(#2e7d32, 0), linewidth = 2)
-pFast = plot(showRun ? fast : na, "Running Trend", color = color.new(#ec407a, 0), linewidth = 2)
-fill(pSlow, pFast, color = showRun and showMain ? (ribbonUp ? color.new(#26a69a, 80) : color.new(#ef5350, 80)) : na, title = "Pullback zone cloud")
+plSlow = plot(showMain ? slow : na, "Main Trend", color = color.new(#2e7d32, 0), linewidth = 2)
+plFast = plot(showRun ? fast : na, "Running Trend", color = color.new(#ec407a, 0), linewidth = 2)
+fill(plSlow, plFast, color = showRun and showMain ? (ribbonUp ? color.new(#26a69a, 80) : color.new(#ef5350, 80)) : na, title = "Pullback zone cloud")
 plot(showInst ? zoneUp : na, "Breakout zone top", color = color.new(#1e88e5, 0), style = plot.style_stepline, linewidth = 1)
 plot(showInst ? zoneLo : na, "Breakout zone bottom", color = color.new(#1e88e5, 0), style = plot.style_stepline, linewidth = 1)
 plot(showHL ? dayH : na, "Today's high", color = color.new(#ffb300, 0), style = plot.style_stepline)
