@@ -22,7 +22,7 @@ manPE = input.string("", "Manual PE symbol (overrides auto)", group = grpU)
 
 // ───────── Inputs: zone ─────────
 grpZ = "Zone (computed on each option's own premium)"
-zoneMethod = input.string("VWAP band", "Zone method", options = ["VWAP band", "Opening range", "EMA band"], group = grpZ)
+zoneMethod = input.string("Institutional VWAP", "Zone method", options = ["Institutional VWAP", "VWAP band", "Opening range", "EMA band"], group = grpZ, tooltip = "Institutional VWAP = anchored VWAP over all loaded data (like the original's green line). VWAP band = session VWAP ± k·σ.")
 vwapMult = input.float(1.0, "VWAP band: standard-deviation multiplier", step = 0.25, minval = 0, group = grpZ)
 orMinutes = input.int(15, "Opening range: minutes", minval = 1, group = grpZ)
 emaLen = input.int(20, "EMA band: length", minval = 1, group = grpZ)
@@ -143,15 +143,16 @@ newDay = timeframe.change("1D")
 var int sessStart = na
 sessStart := newDay ? time : sessStart
 inOR = not na(sessStart) and time - sessStart < orMinutes * 60000
+vwReset = zoneMethod == "Institutional VWAP" ? bar_index == 0 : newDay
 
 // ───────── CE zone (session VWAP ± k·σ, opening range, or EMA ± ATR) ─────────
 ceHLC = (ceH + ceL + ceC) / 3
 var float cePV = 0.0
 var float ceVV = 0.0
 var float cePV2 = 0.0
-cePV := newDay ? nz(ceHLC * ceV) : cePV + nz(ceHLC * ceV)
-ceVV := newDay ? nz(ceV) : ceVV + nz(ceV)
-cePV2 := newDay ? nz(ceHLC * ceHLC * ceV) : cePV2 + nz(ceHLC * ceHLC * ceV)
+cePV := vwReset ? nz(ceHLC * ceV) : cePV + nz(ceHLC * ceV)
+ceVV := vwReset ? nz(ceV) : ceVV + nz(ceV)
+cePV2 := vwReset ? nz(ceHLC * ceHLC * ceV) : cePV2 + nz(ceHLC * ceHLC * ceV)
 ceVw = ceVV > 0 ? cePV / ceVV : na
 ceSd = ceVV > 0 ? math.sqrt(math.max(cePV2 / ceVV - ceVw * ceVw, 0)) : na
 var float ceOrH = na
@@ -161,17 +162,17 @@ ceOrL := newDay ? ceL : inOR ? math.min(nz(ceOrL, ceL), ceL) : ceOrL
 ceEma = ta.ema(ceC, emaLen)
 ceTr = math.max(ceH - ceL, math.abs(ceH - ceC[1]), math.abs(ceL - ceC[1]))
 ceAtr = ta.rma(ceTr, emaLen)
-ceTop = zoneMethod == "VWAP band" ? ceVw + vwapMult * ceSd : zoneMethod == "Opening range" ? ceOrH : ceEma + ceAtr * emaAtrMult
-ceBot = zoneMethod == "VWAP band" ? ceVw - vwapMult * ceSd : zoneMethod == "Opening range" ? ceOrL : ceEma - ceAtr * emaAtrMult
+ceTop = zoneMethod == "Institutional VWAP" ? ceVw : zoneMethod == "VWAP band" ? ceVw + vwapMult * ceSd : zoneMethod == "Opening range" ? ceOrH : ceEma + ceAtr * emaAtrMult
+ceBot = zoneMethod == "Institutional VWAP" ? ceVw : zoneMethod == "VWAP band" ? ceVw - vwapMult * ceSd : zoneMethod == "Opening range" ? ceOrL : ceEma - ceAtr * emaAtrMult
 
 // ───────── PE zone ─────────
 peHLC = (peH + peL + peC) / 3
 var float pePV = 0.0
 var float peVV = 0.0
 var float pePV2 = 0.0
-pePV := newDay ? nz(peHLC * peV) : pePV + nz(peHLC * peV)
-peVV := newDay ? nz(peV) : peVV + nz(peV)
-pePV2 := newDay ? nz(peHLC * peHLC * peV) : pePV2 + nz(peHLC * peHLC * peV)
+pePV := vwReset ? nz(peHLC * peV) : pePV + nz(peHLC * peV)
+peVV := vwReset ? nz(peV) : peVV + nz(peV)
+pePV2 := vwReset ? nz(peHLC * peHLC * peV) : pePV2 + nz(peHLC * peHLC * peV)
 peVw = peVV > 0 ? pePV / peVV : na
 peSd = peVV > 0 ? math.sqrt(math.max(pePV2 / peVV - peVw * peVw, 0)) : na
 var float peOrH = na
@@ -181,8 +182,8 @@ peOrL := newDay ? peL : inOR ? math.min(nz(peOrL, peL), peL) : peOrL
 peEma = ta.ema(peC, emaLen)
 peTr = math.max(peH - peL, math.abs(peH - peC[1]), math.abs(peL - peC[1]))
 peAtr = ta.rma(peTr, emaLen)
-peTop = zoneMethod == "VWAP band" ? peVw + vwapMult * peSd : zoneMethod == "Opening range" ? peOrH : peEma + peAtr * emaAtrMult
-peBot = zoneMethod == "VWAP band" ? peVw - vwapMult * peSd : zoneMethod == "Opening range" ? peOrL : peEma - peAtr * emaAtrMult
+peTop = zoneMethod == "Institutional VWAP" ? peVw : zoneMethod == "VWAP band" ? peVw + vwapMult * peSd : zoneMethod == "Opening range" ? peOrH : peEma + peAtr * emaAtrMult
+peBot = zoneMethod == "Institutional VWAP" ? peVw : zoneMethod == "VWAP band" ? peVw - vwapMult * peSd : zoneMethod == "Opening range" ? peOrL : peEma - peAtr * emaAtrMult
 
 // ───────── Open interest reading ─────────
 ceClass = oiClass(ceC, ceOI)
@@ -247,3 +248,9 @@ table.cell(dash, 0, 8, "STATE", text_color = txtC, bgcolor = hdrBg, text_size = 
 table.cell(dash, 1, 8, state, text_color = color.white, bgcolor = stateCol, text_size = size.normal)
 table.cell(dash, 2, 8, "", bgcolor = stateCol, text_size = size.normal)
 
+// ───────── Alerts ─────────
+stateChanged = state != state[1]
+alertcondition(stateChanged and state == "LONG SETUP", "OPP-D: Long setup", "Option Pulse Dashboard {{ticker}} {{interval}}: LONG SETUP")
+alertcondition(stateChanged and state == "SHORT SETUP", "OPP-D: Short setup", "Option Pulse Dashboard {{ticker}} {{interval}}: SHORT SETUP")
+alertcondition(stateChanged and state == "PREMIUM DECAY", "OPP-D: Premium decay", "Option Pulse Dashboard {{ticker}} {{interval}}: PREMIUM DECAY — avoid")
+alertcondition(stateChanged, "OPP-D: Any state change", "Option Pulse Dashboard {{ticker}} {{interval}}: state changed")

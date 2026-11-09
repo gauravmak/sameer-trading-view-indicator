@@ -1,25 +1,27 @@
 //@version=6
 // Option Pulse Pro (rebuild) — OVERLAY for an option contract's own chart (e.g. NSE:NIFTY261117C24900, 1-minute).
-// Components mirror the original: Institutional Zone (slow EMA), Main Trend - ITM (slower EMA, carries over days),
-// Running Trend - Pullback Zone (fast EMA pair + cloud), optional swing levels and Today's High/Low, background colour.
+// Components mirror the original:
+//   Institutional Breakout Zone  = anchored VWAP (green), anchored to the start of the contract's data by default
+//   Main Trend - ITM             = Supertrend trailing line (blue below price = bullish, pink above price = bearish)
+//   Running Trend - Pullback Zone = fast EMA pair with cloud (green when fast > slow, pink otherwise)
+//   Today's High/Low lines (optional), background colour
 // Extra: finds the opposite leg (same strike & expiry, CE<->PE) and shows the combined CE/PE state with futures OI.
-// Colours are deliberately different from the original (orange / purple / cyan) so both can sit on one chart while tuning.
 // Zero indented lines on purpose, so it survives pasting from a phone browser.
 indicator("Option Pulse Pro (rebuild)", shorttitle = "OPP", overlay = true, max_bars_back = 1000)
 
 // ───────── Inputs ─────────
 grpM = "Main settings"
-showInst = input.bool(true, "Institutional Zone (slow EMA)", group = grpM)
-instLen = input.int(200, "Institutional Zone length", minval = 1, group = grpM)
-showMain = input.bool(true, "Main Trend - ITM (slower EMA)", group = grpM)
-mainLen = input.int(500, "Main Trend length", minval = 1, group = grpM)
-showRun = input.bool(true, "Running Trend - Pullback Zone (fast EMA pair + cloud)", group = grpM)
-runFast = input.int(9, "Running Trend fast length", minval = 1, group = grpM)
-runSlow = input.int(21, "Running Trend slow length", minval = 1, group = grpM)
-showSwing = input.bool(false, "Swing levels (stepped)", group = grpM)
-pivLen = input.int(10, "Swing length (bars each side)", minval = 1, group = grpM)
+showInst = input.bool(true, "Institutional Breakout Zone (anchored VWAP)", group = grpM)
+instAnchor = input.string("All data", "VWAP anchor", options = ["All data", "Session", "Week", "Month"], group = grpM)
+showMain = input.bool(true, "Main Trend - ITM (Supertrend)", group = grpM)
+stTf = input.timeframe("5", "Supertrend timeframe", group = grpM)
+stAtr = input.int(10, "Supertrend ATR period", minval = 1, group = grpM)
+stFactor = input.float(3.0, "Supertrend factor", minval = 0.1, step = 0.1, group = grpM)
+showRun = input.bool(true, "Running Trend - Pullback Zone (EMA pair + cloud)", group = grpM)
+runFast = input.int(9, "Running Trend fast EMA", minval = 1, group = grpM)
+runSlow = input.int(21, "Running Trend slow EMA", minval = 1, group = grpM)
 showHL = input.bool(false, "Today's High/Low lines", group = grpM)
-zoneRef = input.string("Institutional Zone", "Above/below zone is judged against", options = ["Institutional Zone", "Main Trend", "Running Trend cloud"], group = grpM)
+zoneRef = input.string("Institutional VWAP", "Above/below zone is judged against", options = ["Institutional VWAP", "Main Trend (Supertrend)", "Running Trend cloud"], group = grpM)
 grpP = "Opposite leg"
 autoPair = input.bool(true, "Auto-detect opposite leg from chart symbol", group = grpP)
 manPartner = input.string("", "Manual opposite-leg symbol (overrides)", group = grpP)
@@ -37,6 +39,7 @@ tablePos = input.string("Top right", "Table position", options = ["Top right", "
 oiClass(float p, float oi) => na(p - p[oiLookback]) or na(oi - oi[oiLookback]) ? "n/a" : p > p[oiLookback] and oi > oi[oiLookback] ? "Long buildup" : p > p[oiLookback] and oi < oi[oiLookback] ? "Short covering" : p < p[oiLookback] and oi > oi[oiLookback] ? "Short buildup" : p < p[oiLookback] and oi < oi[oiLookback] ? "Long unwinding" : "Flat"
 posLine(float c, float l) => na(c) or na(l) ? 0 : c > l ? 1 : c < l ? -1 : 0
 posBand(float c, float a, float b) => na(c) or na(a) or na(b) ? 0 : c > math.max(a, b) ? 1 : c < math.min(a, b) ? -1 : 0
+posDir(float d) => na(d) ? 0 : d < 0 ? 1 : -1
 posText(int p) => p == 1 ? "Above zone" : p == -1 ? "Below zone" : "Inside zone"
 fmt(float v) => na(v) ? "n/a" : str.tostring(v, format.mintick)
 fmtOI(float v) => na(v) ? "n/a" : str.tostring(v, "#")
@@ -60,27 +63,26 @@ hasPartner = manPartner != "" or (autoPair and isOpt)
 autoRoot = str.contains(tkRaw, "BANKNIFTY") ? "BANKNIFTY" : str.contains(tkRaw, "FINNIFTY") ? "FINNIFTY" : str.contains(tkRaw, "MIDCPNIFTY") ? "MIDCPNIFTY" : str.contains(tkRaw, "SENSEX") ? "SENSEX" : str.contains(tkRaw, "NIFTY") ? "NIFTY" : tkRaw
 root = isOpt ? optRoot : autoRoot
 futSym = syminfo.prefix + ":" + root + futSuffix
+stTfUse = stTf == "" ? timeframe.period : stTf
 
 // ───────── This leg ─────────
-inst = ta.ema(close, instLen)
-mainT = ta.ema(close, mainLen)
+anchorNow = instAnchor == "All data" ? bar_index == 0 : instAnchor == "Session" ? timeframe.change("1D") : instAnchor == "Week" ? timeframe.change("1W") : timeframe.change("1M")
+inst = ta.vwap(hlc3, anchorNow)
+[stLine, stDir] = request.security(syminfo.tickerid, stTfUse, ta.supertrend(stFactor, stAtr), ignore_invalid_symbol = true)
 runF = ta.ema(close, runFast)
 runS = ta.ema(close, runSlow)
 runUp = runF > runS
-ph = ta.pivothigh(high, pivLen, pivLen)
-pl = ta.pivotlow(low, pivLen, pivLen)
-swingUp = ta.valuewhen(not na(ph), ph, 0)
-swingLo = ta.valuewhen(not na(pl), pl, 0)
 newDay = timeframe.change("1D")
 var float dayH = na
 var float dayL = na
 dayH := newDay ? high : math.max(nz(dayH, high), high)
 dayL := newDay ? low : math.min(nz(dayL, low), low)
-thisPos = zoneRef == "Institutional Zone" ? posLine(close, inst) : zoneRef == "Main Trend" ? posLine(close, mainT) : posBand(close, runF, runS)
+thisPos = zoneRef == "Institutional VWAP" ? posLine(close, inst) : zoneRef == "Main Trend (Supertrend)" ? posDir(stDir) : posBand(close, runF, runS)
 
-// ───────── Opposite leg (same maths, fetched from its own chart; Heikin Ashi if this chart is) ─────────
-[pC, pInst, pMain, pRunF, pRunS] = request.security(partnerReq, timeframe.period, [close, ta.ema(close, instLen), ta.ema(close, mainLen), ta.ema(close, runFast), ta.ema(close, runSlow)], ignore_invalid_symbol = true)
-partnerPos = not hasPartner ? 0 : zoneRef == "Institutional Zone" ? posLine(pC, pInst) : zoneRef == "Main Trend" ? posLine(pC, pMain) : posBand(pC, pRunF, pRunS)
+// ───────── Opposite leg (same maths on its own chart; Heikin Ashi if this chart is) ─────────
+[pC, pInst, pRunF, pRunS] = request.security(partnerReq, timeframe.period, [close, ta.vwap(hlc3, anchorNow), ta.ema(close, runFast), ta.ema(close, runSlow)], ignore_invalid_symbol = true)
+[pStLine, pStDir] = request.security(partnerReq, stTfUse, ta.supertrend(stFactor, stAtr), ignore_invalid_symbol = true)
+partnerPos = not hasPartner ? 0 : zoneRef == "Institutional VWAP" ? posLine(pC, pInst) : zoneRef == "Main Trend (Supertrend)" ? posDir(pStDir) : posBand(pC, pRunF, pRunS)
 
 // ───────── Futures open interest ─────────
 futC = request.security(futSym, timeframe.period, close, ignore_invalid_symbol = true)
@@ -100,14 +102,12 @@ colDn = color.new(#ef5350, 0)
 colGrey = color.new(#9e9e9e, 0)
 stateCol = state == "LONG SETUP" ? colUp : state == "SHORT SETUP" ? colDn : state == "PREMIUM DECAY" ? colGrey : zoneBias == 1 ? color.new(#26a69a, 40) : zoneBias == -1 ? color.new(#ef5350, 40) : thisPos == 1 ? color.new(#26a69a, 40) : thisPos == -1 ? color.new(#ef5350, 40) : color.new(#607d8b, 50)
 
-// ───────── Drawing (orange = Institutional, purple = Main Trend, cyan pair = Running Trend) ─────────
-plot(showInst ? inst : na, "Institutional Zone", color = color.new(#ff9800, 0), linewidth = 2)
-plot(showMain ? mainT : na, "Main Trend - ITM", color = color.new(#8e24aa, 0), linewidth = 2)
-plRunF = plot(showRun ? runF : na, "Running Trend fast", color = color.new(#00acc1, 0), linewidth = 1)
-plRunS = plot(showRun ? runS : na, "Running Trend slow", color = color.new(#006064, 0), linewidth = 1)
+// ───────── Drawing ─────────
+plot(showInst ? inst : na, "Institutional Breakout Zone", color = color.new(#43a047, 0), linewidth = 2)
+plot(showMain ? stLine : na, "Main Trend - ITM", color = stDir < 0 ? color.new(#1e88e5, 0) : color.new(#ec407a, 0), linewidth = 2, style = plot.style_linebr)
+plRunF = plot(showRun ? runF : na, "Running Trend fast", color = color.new(#80cbc4, 0), linewidth = 1)
+plRunS = plot(showRun ? runS : na, "Running Trend slow", color = color.new(#f8bbd0, 0), linewidth = 1)
 fill(plRunF, plRunS, color = showRun ? (runUp ? color.new(#26a69a, 75) : color.new(#ef5350, 75)) : na, title = "Pullback zone cloud")
-plot(showSwing ? swingUp : na, "Swing high", color = color.new(#1e88e5, 0), style = plot.style_stepline, linewidth = 1)
-plot(showSwing ? swingLo : na, "Swing low", color = color.new(#1e88e5, 0), style = plot.style_stepline, linewidth = 1)
 plot(showHL ? dayH : na, "Today's high", color = color.new(#ffb300, 0), style = plot.style_stepline)
 plot(showHL ? dayL : na, "Today's low", color = color.new(#ffb300, 0), style = plot.style_stepline)
 bgcolor(showBg ? (thisPos == 1 ? color.new(#26a69a, 88) : thisPos == -1 ? color.new(#ef5350, 88) : na) : na, title = "Background")
@@ -119,7 +119,7 @@ label.set_textcolor(lb, showLabel ? color.white : color.new(#000000, 100))
 
 // ───────── Table ─────────
 tPos = tablePos == "Top right" ? position.top_right : tablePos == "Top left" ? position.top_left : tablePos == "Bottom right" ? position.bottom_right : position.bottom_left
-var table dash = table.new(tPos, 3, 5, border_width = 1, border_color = color.new(#000000, 70))
+var table dash = table.new(tPos, 3, 6, border_width = 1, border_color = color.new(#000000, 70))
 hdrBg = color.new(#263238, 0)
 cellBg = color.new(#37474f, 20)
 txtC = color.white
@@ -135,12 +135,24 @@ table.cell(dash, 2, 0, showTable ? partnerName : "", text_color = tc, bgcolor = 
 table.cell(dash, 0, 1, showTable ? "Symbol" : "", text_color = tc, bgcolor = cb, text_size = size.small)
 table.cell(dash, 1, 1, showTable ? stdId : "", text_color = tc, bgcolor = cb, text_size = size.small)
 table.cell(dash, 2, 1, showTable ? (hasPartner ? partnerSym : "not detected") : "", text_color = tc, bgcolor = cb, text_size = size.small)
-table.cell(dash, 0, 2, showTable ? "Premium" : "", text_color = tc, bgcolor = cb, text_size = size.small)
-table.cell(dash, 1, 2, showTable ? fmt(close) : "", text_color = tc, bgcolor = cb, text_size = size.small)
-table.cell(dash, 2, 2, showTable ? (hasPartner ? fmt(pC) : "-") : "", text_color = tc, bgcolor = cb, text_size = size.small)
-table.cell(dash, 0, 3, showTable ? "Position" : "", text_color = tc, bgcolor = cb, text_size = size.small)
-table.cell(dash, 1, 3, showTable ? posText(thisPos) : "", text_color = showTable ? (thisPos == 1 ? colUp : thisPos == -1 ? colDn : txtC) : hide, bgcolor = cb, text_size = size.small)
-table.cell(dash, 2, 3, showTable ? (hasPartner ? posText(partnerPos) : "-") : "", text_color = showTable ? (partnerPos == 1 ? colUp : partnerPos == -1 ? colDn : txtC) : hide, bgcolor = cb, text_size = size.small)
-table.cell(dash, 0, 4, showTable ? "Fut OI · STATE" : "", text_color = tc, bgcolor = hb, text_size = size.small)
-table.cell(dash, 1, 4, showTable ? futSym + " " + fmtOI(futOI) + " · " + futClass : "", text_color = tc, bgcolor = cb, text_size = size.small)
-table.cell(dash, 2, 4, showTable ? state : "", text_color = showTable ? color.white : hide, bgcolor = showTable ? stateCol : hide, text_size = size.small)
+table.cell(dash, 0, 2, showTable ? "Premium / VWAP" : "", text_color = tc, bgcolor = cb, text_size = size.small)
+table.cell(dash, 1, 2, showTable ? fmt(close) + " / " + fmt(inst) : "", text_color = tc, bgcolor = cb, text_size = size.small)
+table.cell(dash, 2, 2, showTable ? (hasPartner ? fmt(pC) + " / " + fmt(pInst) : "-") : "", text_color = tc, bgcolor = cb, text_size = size.small)
+table.cell(dash, 0, 3, showTable ? "Supertrend" : "", text_color = tc, bgcolor = cb, text_size = size.small)
+table.cell(dash, 1, 3, showTable ? (stDir < 0 ? "Bullish" : "Bearish") + " " + fmt(stLine) : "", text_color = showTable ? (stDir < 0 ? colUp : colDn) : hide, bgcolor = cb, text_size = size.small)
+table.cell(dash, 2, 3, showTable ? (hasPartner ? (pStDir < 0 ? "Bullish" : "Bearish") + " " + fmt(pStLine) : "-") : "", text_color = showTable ? (pStDir < 0 ? colUp : colDn) : hide, bgcolor = cb, text_size = size.small)
+table.cell(dash, 0, 4, showTable ? "Position" : "", text_color = tc, bgcolor = cb, text_size = size.small)
+table.cell(dash, 1, 4, showTable ? posText(thisPos) : "", text_color = showTable ? (thisPos == 1 ? colUp : thisPos == -1 ? colDn : txtC) : hide, bgcolor = cb, text_size = size.small)
+table.cell(dash, 2, 4, showTable ? (hasPartner ? posText(partnerPos) : "-") : "", text_color = showTable ? (partnerPos == 1 ? colUp : partnerPos == -1 ? colDn : txtC) : hide, bgcolor = cb, text_size = size.small)
+table.cell(dash, 0, 5, showTable ? "Fut OI · STATE" : "", text_color = tc, bgcolor = hb, text_size = size.small)
+table.cell(dash, 1, 5, showTable ? futSym + " " + fmtOI(futOI) + " · " + futClass : "", text_color = tc, bgcolor = cb, text_size = size.small)
+table.cell(dash, 2, 5, showTable ? state : "", text_color = showTable ? color.white : hide, bgcolor = showTable ? stateCol : hide, text_size = size.small)
+
+// ───────── Alerts ─────────
+stateChanged = state != state[1]
+alertcondition(stateChanged and state == "LONG SETUP", "OPP: Long setup", "Option Pulse Pro {{ticker}} {{interval}}: LONG SETUP")
+alertcondition(stateChanged and state == "SHORT SETUP", "OPP: Short setup", "Option Pulse Pro {{ticker}} {{interval}}: SHORT SETUP")
+alertcondition(stateChanged and state == "PREMIUM DECAY", "OPP: Premium decay", "Option Pulse Pro {{ticker}} {{interval}}: PREMIUM DECAY — avoid")
+alertcondition(stateChanged, "OPP: Any state change", "Option Pulse Pro {{ticker}} {{interval}}: state changed")
+alertcondition(not na(ta.change(stDir)) and ta.change(stDir) != 0 and stDir < 0, "OPP: Main Trend turned bullish", "Option Pulse Pro {{ticker}} {{interval}}: Main Trend turned bullish")
+alertcondition(not na(ta.change(stDir)) and ta.change(stDir) != 0 and stDir > 0, "OPP: Main Trend turned bearish", "Option Pulse Pro {{ticker}} {{interval}}: Main Trend turned bearish")
