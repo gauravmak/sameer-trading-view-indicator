@@ -14,19 +14,23 @@ The original's zone formula is proprietary, so here the zone is **configurable**
 
 ## Files
 
-- `option_pulse_pro.pine` — the indicator.
-- `tests/oi_probe.pine` — 20-line check: does TradingView expose open interest for an NSE option contract?
+- `option_pulse_pro.pine` — **overlay replica**. Add it to the option contract's own chart (e.g. `NSE:NIFTY261117C24900`, 1-minute), exactly like the original. Draws Main Trend (slow EMA), Running Trend / Pullback Zone (fast EMA + cloud), Institutional Breakout Zone (stepped swing high/low), optional Today's High/Low, background colour. It also auto-detects the opposite leg (same strike and expiry, CE↔PE) and shows the combined CE/PE state and OI in a small table.
+- `option_pulse_dashboard.pine` — **one-pane dashboard**. Add it to the index chart (`NSE:NIFTY`) or to any option chart of it; it picks the ATM CE and PE for the current expiry and shows both premiums, their zones, OI and the state.
+- `tests/oi_probe.pine` — tiny check: does TradingView expose open interest for an NSE option contract? (The dashboard's "Option OI" row answers the same question.)
+
+All scripts have **no indented lines** on purpose: Android browsers re-indent pasted lines, which breaks normal Pine code.
 
 ## Install
 
-1. TradingView → open a **1-minute chart of the index** (`NSE:NIFTY` or `NSE:BANKNIFTY`).
-2. Pine Editor → New → paste `option_pulse_pro.pine` → **Add to chart**.
-3. The dashboard (top right) shows the two option symbols it picked, their premium, zone, position, OI and the final STATE.
+1. TradingView → Pine Editor → New indicator → select all, delete, paste the raw file → **Add to chart**.
+2. Overlay: open the ATM CE chart and the ATM PE chart side by side (1-minute), add the overlay to both. The table on each shows the other leg too.
+3. Dashboard: open `NSE:NIFTY` (1-minute) and add it. The table shows the two option symbols it picked, their premium, zone, position, OI and the final STATE.
 
 ## How it picks contracts
 
 - **Strike**: ATM from the latest price, rounded to the strike step (NIFTY 50, BANKNIFTY 100). `Strike offset` shifts both legs OTM.
-- **Expiry**: auto. NIFTY weekly on Tuesday, BANKNIFTY/FINNIFTY/MIDCPNIFTY monthly (last Tuesday), SENSEX weekly Thursday. Holidays shift expiry, so there is a **Manual expiry (YYMMDD)** override.
+- **Expiry**: auto. NIFTY weekly on Tuesday, BANKNIFTY/FINNIFTY/MIDCPNIFTY monthly (last Tuesday), SENSEX weekly Thursday. If the computed date has no contract (exchange holiday), it falls back to one day earlier. There is also a **Manual expiry (YYMMDD)** override.
+- **On an option chart**: root, expiry and strike are read from the chart symbol itself.
 - **Symbol format**: TradingView's NSE format `NSE:NIFTY251028C26000` (root + yymmdd + C/P + strike). Any leg can be overridden with a manual symbol.
 
 If the dashboard shows `n/a` for the premium, the built symbol is wrong. Search the contract in TradingView's symbol search, copy its exact name into *Manual CE/PE symbol*, and tell me the format so I can fix the auto builder.
@@ -46,6 +50,6 @@ Four alert conditions: Long setup, Short setup, Premium decay, Any state change.
 
 ## Known gaps vs. the original
 
-- Zone definition is a guess until compared side by side with the paid indicator.
+- Line lengths (EMA 20/50, swing length 10) are guesses. Compare the overlay with the paid one on the same chart and tune the lengths in Settings until the lines sit on top of each other.
 - MCX Gold/Crude options: symbol format on TradingView not verified; use manual symbols.
 - Needs real-time NSE data on TradingView (delayed data = 15-minute-late signals on a 1-minute chart).

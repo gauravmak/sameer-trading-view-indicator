@@ -1,0 +1,255 @@
+//@version=6
+// Option Pulse Dashboard (rebuild) — CE/PE premium vs. zone + open-interest confirmation, in one pane.
+// Add to a 1-minute chart of the index (NSE:NIFTY, NSE:BANKNIFTY ...) or of any option contract of it.
+// LONG SETUP: CE above zone, PE below zone, OI bullish. SHORT SETUP: the mirror. PREMIUM DECAY: both below zone.
+// Written with zero indented lines on purpose, so it survives pasting from a phone browser.
+indicator("Option Pulse Dashboard (rebuild)", shorttitle = "OPP-D", overlay = false, max_bars_back = 500)
+
+// ───────── Inputs: underlying & contracts ─────────
+grpU = "Underlying & contracts"
+rootIn = input.string("Auto", "Underlying", options = ["Auto", "NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "Custom"], group = grpU)
+customRoot = input.string("NIFTY", "Custom root (used when Underlying = Custom)", group = grpU)
+exchIn = input.string("Auto", "Exchange prefix", options = ["Auto", "NSE", "BSE", "MCX"], group = grpU)
+stepIn = input.float(0, "Strike step (0 = auto)", minval = 0, group = grpU)
+atmOffset = input.int(0, "Strike offset from ATM (+1 = one strike OTM for both legs)", group = grpU)
+expiryMode = input.string("Auto", "Expiry date", options = ["Auto", "Manual"], group = grpU)
+expiryKind = input.string("Auto", "Expiry cycle", options = ["Auto", "Weekly", "Monthly"], group = grpU)
+expiryDow = input.string("Auto", "Expiry weekday", options = ["Auto", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday"], group = grpU)
+manExpiry = input.string("", "Manual expiry as YYMMDD (e.g. 251111)", group = grpU)
+symFmt = input.string("{EX}:{ROOT}{YY}{MM}{DD}{CP}{STRIKE}", "Symbol format", group = grpU, tooltip = "Tokens: {EX} {ROOT} {YY} {MM} {DD} {MON} {CP} {CEPE} {STRIKE}. TradingView NSE example: NSE:NIFTY251028C26000")
+manCE = input.string("", "Manual CE symbol (overrides auto)", group = grpU)
+manPE = input.string("", "Manual PE symbol (overrides auto)", group = grpU)
+
+// ───────── Inputs: zone ─────────
+grpZ = "Zone (computed on each option's own premium)"
+zoneMethod = input.string("VWAP band", "Zone method", options = ["VWAP band", "Opening range", "EMA band"], group = grpZ)
+vwapMult = input.float(1.0, "VWAP band: standard-deviation multiplier", step = 0.25, minval = 0, group = grpZ)
+orMinutes = input.int(15, "Opening range: minutes", minval = 1, group = grpZ)
+emaLen = input.int(20, "EMA band: length", minval = 1, group = grpZ)
+emaAtrMult = input.float(0.5, "EMA band: ATR multiplier", step = 0.1, minval = 0, group = grpZ)
+
+// ───────── Inputs: open interest ─────────
+grpO = "Open-interest confirmation"
+oiSource = input.string("Futures OI", "Confirm with", options = ["Futures OI", "Option OI", "None"], group = grpO, tooltip = "Futures OI: NIFTY1! open interest (available on TradingView). Option OI: OI of the CE/PE contracts themselves (may not be available). None: zone only.")
+oiLookback = input.int(5, "OI / price change lookback (bars)", minval = 1, group = grpO)
+futSuffix = input.string("1!", "Futures contract suffix", group = grpO)
+
+// ───────── Inputs: display ─────────
+grpD = "Display"
+tablePos = input.string("Top right", "Table position", options = ["Top right", "Top left", "Bottom right", "Bottom left"], group = grpD)
+showBg = input.bool(true, "Colour background by state", group = grpD)
+showZones = input.bool(true, "Draw zone bands", group = grpD)
+
+// ───────── Helpers (single-expression functions) ─────────
+TZ = "Asia/Kolkata"
+MS_DAY = 86400000
+pad2(int n) => (n < 10 ? "0" : "") + str.tostring(n)
+monthName(int m) => array.get(array.from("JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"), m - 1)
+dowNum(string s) => s == "Monday" ? dayofweek.monday : s == "Tuesday" ? dayofweek.tuesday : s == "Wednesday" ? dayofweek.wednesday : s == "Thursday" ? dayofweek.thursday : dayofweek.friday
+pastClose(int t) => hour(t, TZ) > 15 or (hour(t, TZ) == 15 and minute(t, TZ) >= 30)
+monthEnd(int y, int m) => timestamp(TZ, m == 12 ? y + 1 : y, m == 12 ? 1 : m + 1, 1, 12, 0, 0) - MS_DAY
+lastDow(int y, int m, int d) => monthEnd(y, m) - ((dayofweek(monthEnd(y, m), TZ) - d + 7) % 7) * MS_DAY
+oiClass(float p, float oi) => na(p - p[oiLookback]) or na(oi - oi[oiLookback]) ? "n/a" : p > p[oiLookback] and oi > oi[oiLookback] ? "Long buildup" : p > p[oiLookback] and oi < oi[oiLookback] ? "Short covering" : p < p[oiLookback] and oi > oi[oiLookback] ? "Short buildup" : p < p[oiLookback] and oi < oi[oiLookback] ? "Long unwinding" : "Flat"
+posOf(float c, float top, float bot) => na(c) or na(top) or na(bot) ? 0 : c > top ? 1 : c < bot ? -1 : 0
+posText(int p) => p == 1 ? "Above zone" : p == -1 ? "Below zone" : "Inside zone"
+fmt(float v) => na(v) ? "n/a" : str.tostring(v, format.mintick)
+fmtOI(float v) => na(v) ? "n/a" : str.tostring(v, "#")
+
+// ───────── Resolve underlying ─────────
+tk = str.upper(syminfo.ticker)
+optMatchRaw = str.match(tk, "\\d{6}[CP]\\d+$")
+optPart = na(optMatchRaw) ? "" : optMatchRaw
+isOpt = str.length(optPart) > 7
+optRoot = isOpt ? str.substring(tk, 0, str.length(tk) - str.length(optPart)) : ""
+optExp = isOpt ? str.substring(optPart, 0, 6) : ""
+optStrike = isOpt ? str.tonumber(str.substring(optPart, 7)) : na
+autoRoot = str.contains(tk, "BANKNIFTY") ? "BANKNIFTY" : str.contains(tk, "FINNIFTY") ? "FINNIFTY" : str.contains(tk, "MIDCPNIFTY") ? "MIDCPNIFTY" : str.contains(tk, "SENSEX") ? "SENSEX" : str.contains(tk, "NIFTY") ? "NIFTY" : tk
+root = rootIn == "Auto" ? (isOpt ? optRoot : autoRoot) : rootIn == "Custom" ? customRoot : rootIn
+autoEx = root == "SENSEX" ? "BSE" : rootIn == "Custom" ? syminfo.prefix : "NSE"
+ex = exchIn == "Auto" ? autoEx : exchIn
+autoStep = root == "BANKNIFTY" ? 100.0 : root == "SENSEX" ? 100.0 : root == "MIDCPNIFTY" ? 25.0 : 50.0
+step = stepIn > 0 ? stepIn : autoStep
+
+// Expiry defaults (late 2025): NIFTY weekly Tuesday; BANKNIFTY/FINNIFTY/MIDCPNIFTY monthly last Tuesday; SENSEX weekly Thursday.
+autoKind = root == "BANKNIFTY" or root == "FINNIFTY" or root == "MIDCPNIFTY" ? "Monthly" : "Weekly"
+kind = expiryKind == "Auto" ? autoKind : expiryKind
+autoDow = root == "SENSEX" ? dayofweek.thursday : dayofweek.tuesday
+dow = expiryDow == "Auto" ? autoDow : dowNum(expiryDow)
+nowT = timenow
+aheadRaw = (dow - dayofweek(nowT, TZ) + 7) % 7
+ahead = aheadRaw == 0 and pastClose(nowT) ? 7 : aheadRaw
+weeklyExp = nowT + ahead * MS_DAY
+y0 = year(nowT, TZ)
+m0 = month(nowT, TZ)
+e0 = lastDow(y0, m0, dow)
+sameDay = dayofmonth(e0, TZ) == dayofmonth(nowT, TZ) and month(e0, TZ) == month(nowT, TZ)
+expired = (e0 < nowT and not sameDay) or (sameDay and pastClose(nowT))
+monthlyExp = expired ? lastDow(m0 == 12 ? y0 + 1 : y0, m0 == 12 ? 1 : m0 + 1, dow) : e0
+expTs = kind == "Monthly" ? monthlyExp : weeklyExp
+useManualExpiry = expiryMode == "Manual" and str.length(manExpiry) == 6
+expSrc = useManualExpiry ? manExpiry : isOpt ? optExp : ""
+useExpSrc = str.length(expSrc) == 6
+eYY = useExpSrc ? int(str.tonumber(str.substring(expSrc, 0, 2))) : year(expTs, TZ) % 100
+eMM = useExpSrc ? int(str.tonumber(str.substring(expSrc, 2, 4))) : month(expTs, TZ)
+eDD = useExpSrc ? int(str.tonumber(str.substring(expSrc, 4, 6))) : dayofmonth(expTs, TZ)
+// Holiday fallback: if the computed expiry has no contract (exchange holiday), try one day earlier.
+altTs = expTs - MS_DAY
+aYY = year(altTs, TZ) % 100
+aMM = month(altTs, TZ)
+aDD = dayofmonth(altTs, TZ)
+useAltAllowed = not useExpSrc
+
+// ATM strike from the latest price (current month's close with lookahead = same value on every bar, keeps symbol count low).
+idxSym = rootIn == "Custom" ? syminfo.tickerid : ex + ":" + root
+refPrice = request.security(idxSym, "1M", close, lookahead = barmerge.lookahead_on, ignore_invalid_symbol = true)
+atmStrike = isOpt and rootIn == "Auto" ? optStrike + atmOffset * step : math.round(nz(refPrice, close) / step) * step + atmOffset * step
+strikeTxt = str.tostring(atmStrike, "#")
+symBase = str.replace_all(str.replace_all(str.replace_all(str.replace_all(str.replace_all(str.replace_all(str.replace_all(symFmt, "{EX}", ex), "{ROOT}", root), "{YY}", pad2(eYY)), "{MM}", pad2(eMM)), "{DD}", pad2(eDD)), "{MON}", monthName(eMM)), "{STRIKE}", strikeTxt)
+ceSym0 = manCE != "" ? manCE : str.replace_all(str.replace_all(symBase, "{CP}", "C"), "{CEPE}", "CE")
+peSym0 = manPE != "" ? manPE : str.replace_all(str.replace_all(symBase, "{CP}", "P"), "{CEPE}", "PE")
+altBase = str.replace_all(str.replace_all(str.replace_all(str.replace_all(str.replace_all(str.replace_all(str.replace_all(symFmt, "{EX}", ex), "{ROOT}", root), "{YY}", pad2(aYY)), "{MM}", pad2(aMM)), "{DD}", pad2(aDD)), "{MON}", monthName(aMM)), "{STRIKE}", strikeTxt)
+ceSymA = manCE != "" or not useAltAllowed ? ceSym0 : str.replace_all(str.replace_all(altBase, "{CP}", "C"), "{CEPE}", "CE")
+peSymA = manPE != "" or not useAltAllowed ? peSym0 : str.replace_all(str.replace_all(altBase, "{CP}", "P"), "{CEPE}", "PE")
+futSym = ex + ":" + root + futSuffix
+
+// ───────── Fetch option, futures and OI series ─────────
+[ceC0, ceH0, ceL0, ceV0] = request.security(ceSym0, timeframe.period, [close, high, low, volume], ignore_invalid_symbol = true)
+[peC0, peH0, peL0, peV0] = request.security(peSym0, timeframe.period, [close, high, low, volume], ignore_invalid_symbol = true)
+[ceCA, ceHA, ceLA, ceVA] = request.security(ceSymA, timeframe.period, [close, high, low, volume], ignore_invalid_symbol = true)
+[peCA, peHA, peLA, peVA] = request.security(peSymA, timeframe.period, [close, high, low, volume], ignore_invalid_symbol = true)
+ceUseAlt = na(ceC0) and not na(ceCA)
+peUseAlt = na(peC0) and not na(peCA)
+ceSym = ceUseAlt ? ceSymA : ceSym0
+peSym = peUseAlt ? peSymA : peSym0
+ceC = ceUseAlt ? ceCA : ceC0
+ceH = ceUseAlt ? ceHA : ceH0
+ceL = ceUseAlt ? ceLA : ceL0
+ceV = ceUseAlt ? ceVA : ceV0
+peC = peUseAlt ? peCA : peC0
+peH = peUseAlt ? peHA : peH0
+peL = peUseAlt ? peLA : peL0
+peV = peUseAlt ? peVA : peV0
+ceOI0 = request.security(ceSym0 + "_OI", timeframe.period, close, ignore_invalid_symbol = true)
+peOI0 = request.security(peSym0 + "_OI", timeframe.period, close, ignore_invalid_symbol = true)
+ceOIA = request.security(ceSymA + "_OI", timeframe.period, close, ignore_invalid_symbol = true)
+peOIA = request.security(peSymA + "_OI", timeframe.period, close, ignore_invalid_symbol = true)
+ceOI = ceUseAlt ? ceOIA : ceOI0
+peOI = peUseAlt ? peOIA : peOI0
+futC = request.security(futSym, timeframe.period, close, ignore_invalid_symbol = true)
+futOI = request.security(futSym + "_OI", timeframe.period, close, ignore_invalid_symbol = true)
+
+// ───────── Session state ─────────
+newDay = timeframe.change("1D")
+var int sessStart = na
+sessStart := newDay ? time : sessStart
+inOR = not na(sessStart) and time - sessStart < orMinutes * 60000
+
+// ───────── CE zone (session VWAP ± k·σ, opening range, or EMA ± ATR) ─────────
+ceHLC = (ceH + ceL + ceC) / 3
+var float cePV = 0.0
+var float ceVV = 0.0
+var float cePV2 = 0.0
+cePV := newDay ? nz(ceHLC * ceV) : cePV + nz(ceHLC * ceV)
+ceVV := newDay ? nz(ceV) : ceVV + nz(ceV)
+cePV2 := newDay ? nz(ceHLC * ceHLC * ceV) : cePV2 + nz(ceHLC * ceHLC * ceV)
+ceVw = ceVV > 0 ? cePV / ceVV : na
+ceSd = ceVV > 0 ? math.sqrt(math.max(cePV2 / ceVV - ceVw * ceVw, 0)) : na
+var float ceOrH = na
+var float ceOrL = na
+ceOrH := newDay ? ceH : inOR ? math.max(nz(ceOrH, ceH), ceH) : ceOrH
+ceOrL := newDay ? ceL : inOR ? math.min(nz(ceOrL, ceL), ceL) : ceOrL
+ceEma = ta.ema(ceC, emaLen)
+ceTr = math.max(ceH - ceL, math.abs(ceH - ceC[1]), math.abs(ceL - ceC[1]))
+ceAtr = ta.rma(ceTr, emaLen)
+ceTop = zoneMethod == "VWAP band" ? ceVw + vwapMult * ceSd : zoneMethod == "Opening range" ? ceOrH : ceEma + ceAtr * emaAtrMult
+ceBot = zoneMethod == "VWAP band" ? ceVw - vwapMult * ceSd : zoneMethod == "Opening range" ? ceOrL : ceEma - ceAtr * emaAtrMult
+
+// ───────── PE zone ─────────
+peHLC = (peH + peL + peC) / 3
+var float pePV = 0.0
+var float peVV = 0.0
+var float pePV2 = 0.0
+pePV := newDay ? nz(peHLC * peV) : pePV + nz(peHLC * peV)
+peVV := newDay ? nz(peV) : peVV + nz(peV)
+pePV2 := newDay ? nz(peHLC * peHLC * peV) : pePV2 + nz(peHLC * peHLC * peV)
+peVw = peVV > 0 ? pePV / peVV : na
+peSd = peVV > 0 ? math.sqrt(math.max(pePV2 / peVV - peVw * peVw, 0)) : na
+var float peOrH = na
+var float peOrL = na
+peOrH := newDay ? peH : inOR ? math.max(nz(peOrH, peH), peH) : peOrH
+peOrL := newDay ? peL : inOR ? math.min(nz(peOrL, peL), peL) : peOrL
+peEma = ta.ema(peC, emaLen)
+peTr = math.max(peH - peL, math.abs(peH - peC[1]), math.abs(peL - peC[1]))
+peAtr = ta.rma(peTr, emaLen)
+peTop = zoneMethod == "VWAP band" ? peVw + vwapMult * peSd : zoneMethod == "Opening range" ? peOrH : peEma + peAtr * emaAtrMult
+peBot = zoneMethod == "VWAP band" ? peVw - vwapMult * peSd : zoneMethod == "Opening range" ? peOrL : peEma - peAtr * emaAtrMult
+
+// ───────── Open interest reading ─────────
+ceClass = oiClass(ceC, ceOI)
+peClass = oiClass(peC, peOI)
+futClass = oiClass(futC, futOI)
+bullOI = oiSource == "None" ? true : oiSource == "Futures OI" ? (futClass == "Long buildup" or futClass == "Short covering") : (ceClass == "Long buildup" or peClass == "Short buildup")
+bearOI = oiSource == "None" ? true : oiSource == "Futures OI" ? (futClass == "Short buildup" or futClass == "Long unwinding") : (peClass == "Long buildup" or ceClass == "Short buildup")
+oiAvailable = oiSource == "None" ? true : oiSource == "Futures OI" ? not na(futOI) : not na(ceOI) and not na(peOI)
+
+// ───────── State ─────────
+cePos = posOf(ceC, ceTop, ceBot)
+pePos = posOf(peC, peTop, peBot)
+zoneBias = cePos == 1 and pePos == -1 ? 1 : pePos == 1 and cePos == -1 ? -1 : cePos == -1 and pePos == -1 ? 2 : 0
+state = zoneBias == 1 and bullOI ? "LONG SETUP" : zoneBias == -1 and bearOI ? "SHORT SETUP" : zoneBias == 2 ? "PREMIUM DECAY" : zoneBias == 1 ? "LONG (no OI confirm)" : zoneBias == -1 ? "SHORT (no OI confirm)" : "NEUTRAL"
+colLong = color.new(#26a69a, 0)
+colShort = color.new(#ef5350, 0)
+colDecay = color.new(#9e9e9e, 0)
+stateCol = state == "LONG SETUP" ? colLong : state == "SHORT SETUP" ? colShort : state == "PREMIUM DECAY" ? colDecay : zoneBias == 1 ? color.new(#26a69a, 50) : zoneBias == -1 ? color.new(#ef5350, 50) : color.new(#607d8b, 60)
+
+// ───────── Plots ─────────
+plot(ceC, "CE premium", color = colLong, linewidth = 2)
+plot(peC, "PE premium", color = colShort, linewidth = 2)
+pCeT = plot(showZones ? ceTop : na, "CE zone top", color = color.new(#26a69a, 60))
+pCeB = plot(showZones ? ceBot : na, "CE zone bottom", color = color.new(#26a69a, 60))
+pPeT = plot(showZones ? peTop : na, "PE zone top", color = color.new(#ef5350, 60))
+pPeB = plot(showZones ? peBot : na, "PE zone bottom", color = color.new(#ef5350, 60))
+fill(pCeT, pCeB, color = color.new(#26a69a, 88), title = "CE zone")
+fill(pPeT, pPeB, color = color.new(#ef5350, 88), title = "PE zone")
+bgcolor(showBg ? color.new(stateCol, 85) : na, title = "State background")
+
+// ───────── Dashboard (updated every bar; no if-block so the file has no indentation) ─────────
+tPos = tablePos == "Top right" ? position.top_right : tablePos == "Top left" ? position.top_left : tablePos == "Bottom right" ? position.bottom_right : position.bottom_left
+var table dash = table.new(tPos, 3, 10, border_width = 1, border_color = color.new(#000000, 70))
+hdrBg = color.new(#263238, 0)
+cellBg = color.new(#37474f, 20)
+txtC = color.white
+table.cell(dash, 0, 0, "Option Pulse Dash", text_color = txtC, bgcolor = hdrBg, text_size = size.small)
+table.cell(dash, 1, 0, "CE", text_color = colLong, bgcolor = hdrBg, text_size = size.small)
+table.cell(dash, 2, 0, "PE", text_color = colShort, bgcolor = hdrBg, text_size = size.small)
+table.cell(dash, 0, 1, "Symbol", text_color = txtC, bgcolor = cellBg, text_size = size.small)
+table.cell(dash, 1, 1, ceSym, text_color = txtC, bgcolor = cellBg, text_size = size.small)
+table.cell(dash, 2, 1, peSym, text_color = txtC, bgcolor = cellBg, text_size = size.small)
+table.cell(dash, 0, 2, "Premium", text_color = txtC, bgcolor = cellBg, text_size = size.small)
+table.cell(dash, 1, 2, fmt(ceC), text_color = txtC, bgcolor = cellBg, text_size = size.small)
+table.cell(dash, 2, 2, fmt(peC), text_color = txtC, bgcolor = cellBg, text_size = size.small)
+table.cell(dash, 0, 3, "Zone", text_color = txtC, bgcolor = cellBg, text_size = size.small)
+table.cell(dash, 1, 3, fmt(ceBot) + " – " + fmt(ceTop), text_color = txtC, bgcolor = cellBg, text_size = size.small)
+table.cell(dash, 2, 3, fmt(peBot) + " – " + fmt(peTop), text_color = txtC, bgcolor = cellBg, text_size = size.small)
+table.cell(dash, 0, 4, "Position", text_color = txtC, bgcolor = cellBg, text_size = size.small)
+table.cell(dash, 1, 4, posText(cePos), text_color = cePos == 1 ? colLong : cePos == -1 ? colShort : txtC, bgcolor = cellBg, text_size = size.small)
+table.cell(dash, 2, 4, posText(pePos), text_color = pePos == 1 ? colLong : pePos == -1 ? colShort : txtC, bgcolor = cellBg, text_size = size.small)
+table.cell(dash, 0, 5, "Option OI", text_color = txtC, bgcolor = cellBg, text_size = size.small)
+table.cell(dash, 1, 5, fmtOI(ceOI) + " · " + ceClass, text_color = txtC, bgcolor = cellBg, text_size = size.small)
+table.cell(dash, 2, 5, fmtOI(peOI) + " · " + peClass, text_color = txtC, bgcolor = cellBg, text_size = size.small)
+table.cell(dash, 0, 6, "Futures", text_color = txtC, bgcolor = cellBg, text_size = size.small)
+table.cell(dash, 1, 6, futSym + "  " + fmt(futC), text_color = txtC, bgcolor = cellBg, text_size = size.small)
+table.cell(dash, 2, 6, fmtOI(futOI) + " · " + futClass, text_color = txtC, bgcolor = cellBg, text_size = size.small)
+table.cell(dash, 0, 7, "Expiry / ATM", text_color = txtC, bgcolor = cellBg, text_size = size.small)
+table.cell(dash, 1, 7, "20" + pad2(eYY) + "-" + pad2(eMM) + "-" + pad2(eDD), text_color = txtC, bgcolor = cellBg, text_size = size.small)
+table.cell(dash, 2, 7, strikeTxt + (oiAvailable ? "" : "  (OI n/a)"), text_color = txtC, bgcolor = cellBg, text_size = size.small)
+table.cell(dash, 0, 8, "STATE", text_color = txtC, bgcolor = hdrBg, text_size = size.small)
+table.cell(dash, 1, 8, state, text_color = color.white, bgcolor = stateCol, text_size = size.normal)
+table.cell(dash, 2, 8, "", bgcolor = stateCol, text_size = size.normal)
+
+// ───────── Alerts ─────────
+stateChanged = state != state[1]
+alertcondition(stateChanged and state == "LONG SETUP", "OPP: Long setup", "Option Pulse Pro {{ticker}} {{interval}}: LONG SETUP")
+alertcondition(stateChanged and state == "SHORT SETUP", "OPP: Short setup", "Option Pulse Pro {{ticker}} {{interval}}: SHORT SETUP")
+alertcondition(stateChanged and state == "PREMIUM DECAY", "OPP: Premium decay", "Option Pulse Pro {{ticker}} {{interval}}: PREMIUM DECAY — avoid")
+alertcondition(stateChanged, "OPP: Any state change", "Option Pulse Pro {{ticker}} {{interval}}: state changed")

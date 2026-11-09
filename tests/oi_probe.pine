@@ -3,7 +3,7 @@
 // Add to any chart, then set the CE symbol in Settings to a live ATM contract (format NSE:NIFTYyymmddCstrike).
 // Zero indented lines on purpose, so it survives pasting from a phone browser.
 indicator("OPP OI probe", overlay = false)
-ceSym = input.string("NSE:NIFTY251111C25500", "CE symbol")
+ceSym = input.string("NSE:NIFTY261117C24900", "CE symbol")
 futSym = input.string("NSE:NIFTY1!", "Futures symbol")
 ceC = request.security(ceSym, timeframe.period, close, ignore_invalid_symbol = true)
 ceOI = request.security(ceSym + "_OI", timeframe.period, close, ignore_invalid_symbol = true)
