@@ -10,7 +10,7 @@ The original reads the **ATM call (CE) and put (PE) premiums against a "zone"** 
 | SHORT SETUP | below zone | above zone | long unwinding / short buildup |
 | PREMIUM DECAY (avoid) | below zone | below zone | no long buildup |
 
-The original's formulas are not public. The green zone line is an anchored VWAP (matched to 0.05). The blue/pink Main Trend was fitted against the paid indicator's exported values: a volume-weighted centre (elastic VWMA) ± 2 × ATR(14) band. Fitted jointly on CE and PE exports with volume: mean error about 2 points (under 1% of premium), flips on the same minutes. The Running Trend is a fast EMA pair with a small cloud, plus a "pullback wedge" filled between the Main Trend line and the fast EMA, as in the original. Every length is an input.
+The original's formulas are not public. The green zone line is an anchored VWAP (matched to 0.05). The blue/pink Main Trend was fitted against the paid indicator's exported values: a volume-weighted centre (elastic VWMA) ± 2 × ATR(14) band. Fitted jointly on CE and PE exports with volume: mean error about 2 points (under 1% of premium), flips on the same minutes. The Running Trend is a fast EMA running line with the "pullback wedge" filled between it and the Main Trend line, as in the original; a second EMA with a small cloud is available as an optional extra. Every length is an input.
 
 ## Files
 

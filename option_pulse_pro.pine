@@ -6,8 +6,8 @@
 //   Main Trend - ITM             = volume-weighted centre (elastic VWMA) ± factor × ATR, shown as the lower band while
 //                                  bullish (blue) and the upper band while bearish (pink); flips when close crosses it.
 //                                  Fitted to the paid indicator's exported CE and PE values with volume (EVWMA 62 of hlc3, ATR 14, factor 2.0).
-//   Running Trend - Pullback Zone = fast EMA pair with a small cloud (green when fast > slow, pink otherwise), plus the
-//                                  pullback wedge filled between the Main Trend line and the fast EMA (green bull / pink bear)
+//   Running Trend - Pullback Zone = fast EMA running line, with the pullback wedge filled between the Main Trend line
+//                                  and that running line (green while bullish / pink while bearish)
 //   Today's High/Low lines (optional), background colour
 // Extra: finds the opposite leg (same strike & expiry, CE<->PE) and shows the combined CE/PE state with futures OI.
 // Zero indented lines on purpose, so it survives pasting from a phone browser.
@@ -21,10 +21,10 @@ showMain = input.bool(true, "Main Trend - ITM (volume-weighted band)", group = g
 mtLen = input.int(62, "Main Trend length (elastic VWMA of hlc3)", minval = 1, group = grpM)
 mtAtr = input.int(14, "Main Trend ATR period", minval = 1, group = grpM)
 mtFactor = input.float(2.0, "Main Trend ATR factor", minval = 0.1, step = 0.1, group = grpM)
-showRun = input.bool(true, "Running Trend - Pullback Zone (EMA pair + cloud)", group = grpM)
-showWedge = input.bool(true, "Pullback wedge (fill between Main Trend and fast EMA)", group = grpM)
-runFast = input.int(9, "Running Trend fast EMA", minval = 1, group = grpM)
-runSlow = input.int(21, "Running Trend slow EMA", minval = 1, group = grpM)
+showRun = input.bool(true, "Running Trend - Pullback Zone (running line + wedge)", group = grpM)
+runFast = input.int(9, "Running Trend EMA length", minval = 1, group = grpM)
+showPair = input.bool(false, "Extra: second EMA with small cloud (not in the original)", group = grpM)
+runSlow = input.int(21, "Extra: second EMA length", minval = 1, group = grpM)
 showHL = input.bool(false, "Today's High/Low lines", group = grpM)
 zoneRef = input.string("Institutional VWAP", "Above/below zone is judged against", options = ["Institutional VWAP", "Main Trend", "Running Trend cloud"], group = grpM)
 grpP = "Opposite leg"
@@ -129,11 +129,11 @@ stateCol = state == "LONG SETUP" ? colUp : state == "SHORT SETUP" ? colDn : stat
 // ───────── Drawing ─────────
 plot(showInst ? inst : na, "Institutional Breakout Zone", color = color.new(#43a047, 0), linewidth = 2)
 plMain = plot(showMain ? stLine : na, "Main Trend - ITM", color = stDir < 0 ? color.new(#1e88e5, 0) : color.new(#ec407a, 0), linewidth = 2, style = plot.style_linebr)
-plRunF = plot(showRun ? runF : na, "Running Trend fast", color = color.new(#80cbc4, 0), linewidth = 1)
-plRunS = plot(showRun ? runS : na, "Running Trend slow", color = color.new(#f8bbd0, 0), linewidth = 1)
-plWedge = plot(showWedge ? runF : na, "Pullback wedge edge", color = color.new(#000000, 100), editable = false)
-fill(plMain, plWedge, color = showWedge and showMain ? (stDir < 0 ? color.new(#26a69a, 85) : color.new(#ef5350, 85)) : na, title = "Pullback wedge")
-fill(plRunF, plRunS, color = showRun ? (runUp ? color.new(#26a69a, 70) : color.new(#ef5350, 70)) : na, title = "Running trend cloud")
+plRunF = plot(showRun ? runF : na, "Running Trend", color = stDir < 0 ? color.new(#26a69a, 30) : color.new(#ef5350, 30), linewidth = 1)
+plRunS = plot(showPair ? runS : na, "Extra second EMA", color = color.new(#f8bbd0, 0), linewidth = 1)
+plWedge = plot(showRun ? runF : na, "Pullback wedge edge", color = color.new(#000000, 100), editable = false)
+fill(plMain, plWedge, color = showRun and showMain ? (stDir < 0 ? color.new(#26a69a, 85) : color.new(#ef5350, 85)) : na, title = "Pullback wedge")
+fill(plRunF, plRunS, color = showPair ? (runUp ? color.new(#26a69a, 70) : color.new(#ef5350, 70)) : na, title = "Extra EMA cloud")
 plot(showHL ? dayH : na, "Today's high", color = color.new(#ffb300, 0), style = plot.style_stepline)
 plot(showHL ? dayL : na, "Today's low", color = color.new(#ffb300, 0), style = plot.style_stepline)
 bgcolor(showBg ? (thisPos == 1 ? color.new(#26a69a, 88) : thisPos == -1 ? color.new(#ef5350, 88) : na) : na, title = "Background")
@@ -155,7 +155,7 @@ hb = showTable ? hdrBg : hide
 tc = showTable ? txtC : hide
 thisName = isOpt ? (thisIsCE ? "CE (this chart)" : "PE (this chart)") : "This chart"
 partnerName = isOpt ? (thisIsCE ? "PE (other leg)" : "CE (other leg)") : "Other leg"
-table.cell(dash, 0, 0, showTable ? "Option Pulse Pro v1.2" : "", text_color = tc, bgcolor = hb, text_size = size.small)
+table.cell(dash, 0, 0, showTable ? "Option Pulse Pro v1.3" : "", text_color = tc, bgcolor = hb, text_size = size.small)
 table.cell(dash, 1, 0, showTable ? thisName : "", text_color = tc, bgcolor = hb, text_size = size.small)
 table.cell(dash, 2, 0, showTable ? partnerName : "", text_color = tc, bgcolor = hb, text_size = size.small)
 table.cell(dash, 0, 1, showTable ? "Symbol" : "", text_color = tc, bgcolor = cb, text_size = size.small)
