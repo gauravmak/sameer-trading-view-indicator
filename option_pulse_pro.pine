@@ -131,7 +131,7 @@ plot(showInst ? inst : na, "Institutional Breakout Zone", color = color.new(#43a
 plMain = plot(showMain ? stLine : na, "Main Trend - ITM", color = stDir < 0 ? color.new(#1e88e5, 0) : color.new(#ec407a, 0), linewidth = 2, style = plot.style_linebr)
 plRunF = plot(showRun ? runF : na, "Running Trend fast", color = color.new(#80cbc4, 0), linewidth = 1)
 plRunS = plot(showRun ? runS : na, "Running Trend slow", color = color.new(#f8bbd0, 0), linewidth = 1)
-plWedge = plot(showWedge ? runF : na, "Pullback wedge edge", color = color.new(#000000, 100), display = display.none)
+plWedge = plot(showWedge ? runF : na, "Pullback wedge edge", color = color.new(#000000, 100), editable = false)
 fill(plMain, plWedge, color = showWedge and showMain ? (stDir < 0 ? color.new(#26a69a, 85) : color.new(#ef5350, 85)) : na, title = "Pullback wedge")
 fill(plRunF, plRunS, color = showRun ? (runUp ? color.new(#26a69a, 70) : color.new(#ef5350, 70)) : na, title = "Running trend cloud")
 plot(showHL ? dayH : na, "Today's high", color = color.new(#ffb300, 0), style = plot.style_stepline)
@@ -155,7 +155,7 @@ hb = showTable ? hdrBg : hide
 tc = showTable ? txtC : hide
 thisName = isOpt ? (thisIsCE ? "CE (this chart)" : "PE (this chart)") : "This chart"
 partnerName = isOpt ? (thisIsCE ? "PE (other leg)" : "CE (other leg)") : "Other leg"
-table.cell(dash, 0, 0, showTable ? "Option Pulse Pro" : "", text_color = tc, bgcolor = hb, text_size = size.small)
+table.cell(dash, 0, 0, showTable ? "Option Pulse Pro v1.2" : "", text_color = tc, bgcolor = hb, text_size = size.small)
 table.cell(dash, 1, 0, showTable ? thisName : "", text_color = tc, bgcolor = hb, text_size = size.small)
 table.cell(dash, 2, 0, showTable ? partnerName : "", text_color = tc, bgcolor = hb, text_size = size.small)
 table.cell(dash, 0, 1, showTable ? "Symbol" : "", text_color = tc, bgcolor = cb, text_size = size.small)
