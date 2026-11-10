@@ -1,0 +1,166 @@
+//@version=6
+// Option Pulse DAILY ITM SIMULATOR (rebuild) — run on the NSE:NIFTY (or BANKNIFTY) index chart, 1-minute, regular candles.
+// Each day: call strike = day's open rounded DOWN to 100, put strike = rounded UP to 100 (the paid "100-point ITM" method).
+// Both legs are traded with the VWAP-cross rule: buy when a 1-minute candle closes above that option's green line
+// (monthly anchored VWAP of the option), exit when a candle closes below it or at +N points, whichever first.
+// TradingView strategies can only trade the chart symbol, so this script keeps its own ledger and shows the stats in a table.
+// Limits: only contracts TradingView still has data for (the live expiry), and at most ~20 distinct strikes (40 symbols).
+// This file uses normal indentation: paste it from a laptop, not a phone.
+indicator("Option Pulse Daily ITM Simulator", shorttitle = "OPP-SIM", overlay = false, max_bars_back = 500)
+
+// ───────── Inputs ─────────
+grpC = "Contracts"
+rootIn = input.string("Auto", "Underlying", options = ["Auto", "NIFTY", "BANKNIFTY", "SENSEX"], group = grpC)
+expiryMode = input.string("Auto (next Tuesday)", "Expiry", options = ["Auto (next Tuesday)", "Manual"], group = grpC)
+manExpiry = input.string("", "Manual expiry YYMMDD (e.g. 261117)", group = grpC)
+roundStep = input.int(100, "Strike rounding step", minval = 50, step = 50, group = grpC)
+tradeCE = input.bool(true, "Trade the call", group = grpC)
+tradePE = input.bool(true, "Trade the put", group = grpC)
+grpR = "Rule"
+targetPts = input.float(40, "Target in premium points", minval = 1, step = 5, group = grpR)
+lotUnits = input.int(75, "Units per lot (NIFTY 75)", minval = 1, group = grpR)
+lots = input.int(1, "Lots per trade", minval = 1, group = grpR)
+costPerOrder = input.float(40, "Cost per order (Rs)", minval = 0, group = grpR)
+skipOpenMin = input.int(1, "No entries in the first N minutes", minval = 1, group = grpR)
+noEntryAfterHHMM = input.int(1500, "No new entries after (HHMM)", minval = 0, maxval = 2359, group = grpR)
+squareOffHHMM = input.int(1515, "Square-off time (HHMM)", minval = 0, maxval = 2359, group = grpR)
+
+// ───────── Expiry & strikes ─────────
+TZ = "Asia/Kolkata"
+MS_DAY = 86400000
+pad2(int n) => (n < 10 ? "0" : "") + str.tostring(n)
+tk = str.upper(syminfo.ticker)
+autoRoot = str.contains(tk, "BANKNIFTY") ? "BANKNIFTY" : str.contains(tk, "SENSEX") ? "SENSEX" : "NIFTY"
+root = rootIn == "Auto" ? autoRoot : rootIn
+ex = root == "SENSEX" ? "BSE" : "NSE"
+pastClose(int t) => hour(t, TZ) > 15 or (hour(t, TZ) == 15 and minute(t, TZ) >= 30)
+aheadRaw = (dayofweek.tuesday - dayofweek(timenow, TZ) + 7) % 7
+ahead = aheadRaw == 0 and pastClose(timenow) ? 7 : aheadRaw
+expTs = timenow + ahead * MS_DAY
+useMan = expiryMode == "Manual" and str.length(manExpiry) == 6
+expTxt = useMan ? manExpiry : pad2(year(expTs, TZ) % 100) + pad2(month(expTs, TZ)) + pad2(dayofmonth(expTs, TZ))
+
+newDay = timeframe.change("1D")
+var float dayOpen = na
+dayOpen := newDay ? open : dayOpen
+var int sessStart = na
+sessStart := newDay ? time : sessStart
+minsIn = na(sessStart) ? 999 : (time - sessStart) / 60000
+hhmm = hour(time, TZ) * 100 + minute(time, TZ)
+ceK = math.floor(dayOpen / roundStep) * roundStep
+peK0 = math.ceil(dayOpen / roundStep) * roundStep
+peK = peK0 == ceK ? peK0 + roundStep : peK0
+ceSym = ex + ":" + root + expTxt + "C" + str.tostring(ceK, "#")
+peSym = ex + ":" + root + expTxt + "P" + str.tostring(peK, "#")
+
+// ───────── Option prices and their green lines ─────────
+[ceC, ceVw] = request.security(ceSym, timeframe.period, [close, ta.vwap(hlc3, bar_index == 0 or timeframe.change("1M"))], ignore_invalid_symbol = true)
+[peC, peVw] = request.security(peSym, timeframe.period, [close, ta.vwap(hlc3, bar_index == 0 or timeframe.change("1M"))], ignore_invalid_symbol = true)
+ceAbove = ceC > ceVw
+peAbove = peC > peVw
+// a cross is only valid inside the same day (the contract can change at the day boundary)
+ceCross = ceAbove and not ceAbove[1] and not newDay and not na(ceC[1])
+peCross = peAbove and not peAbove[1] and not newDay and not na(peC[1])
+canEnter = minsIn >= skipOpenMin and hhmm < noEntryAfterHHMM and hhmm < squareOffHHMM and barstate.isconfirmed
+isSquareOff = hhmm >= squareOffHHMM
+unitsPerTrade = lotUnits * lots
+roundTripCost = 2 * costPerOrder
+
+// ───────── Ledger ─────────
+var int nTrades = 0
+var int nWins = 0
+var float grossWin = 0.0
+var float grossLoss = 0.0
+var float netPnl = 0.0
+var float peakPnl = 0.0
+var float maxDD = 0.0
+var int ceTrades = 0
+var float cePnl = 0.0
+var int peTrades = 0
+var float pePnl = 0.0
+var int exitsTarget = 0
+var int exitsVwap = 0
+var int exitsSquare = 0
+
+book(float pnl) =>
+    nTrades += 1
+    nWins += pnl > 0 ? 1 : 0
+    grossWin += pnl > 0 ? pnl : 0
+    grossLoss += pnl < 0 ? -pnl : 0
+    netPnl += pnl
+    peakPnl := math.max(peakPnl, netPnl)
+    maxDD := math.max(maxDD, peakPnl - netPnl)
+
+// CE leg
+var bool ceIn = false
+var float ceEntry = na
+if ceIn
+    hitTarget = ceC >= ceEntry + targetPts
+    exitNow = hitTarget or ceC < ceVw or isSquareOff or na(ceC)
+    if exitNow
+        exitPx = hitTarget ? ceEntry + targetPts : nz(ceC, ceEntry)
+        pnl = (exitPx - ceEntry) * unitsPerTrade - roundTripCost
+        book(pnl)
+        ceTrades += 1
+        cePnl += pnl
+        exitsTarget += hitTarget ? 1 : 0
+        exitsVwap += not hitTarget and ceC < ceVw ? 1 : 0
+        exitsSquare += not hitTarget and not (ceC < ceVw) ? 1 : 0
+        ceIn := false
+if not ceIn and tradeCE and canEnter and ceCross
+    ceIn := true
+    ceEntry := ceC
+
+// PE leg
+var bool peIn = false
+var float peEntry = na
+if peIn
+    hitTargetP = peC >= peEntry + targetPts
+    exitNowP = hitTargetP or peC < peVw or isSquareOff or na(peC)
+    if exitNowP
+        exitPxP = hitTargetP ? peEntry + targetPts : nz(peC, peEntry)
+        pnlP = (exitPxP - peEntry) * unitsPerTrade - roundTripCost
+        book(pnlP)
+        peTrades += 1
+        pePnl += pnlP
+        exitsTarget += hitTargetP ? 1 : 0
+        exitsVwap += not hitTargetP and peC < peVw ? 1 : 0
+        exitsSquare += not hitTargetP and not (peC < peVw) ? 1 : 0
+        peIn := false
+if not peIn and tradePE and canEnter and peCross
+    peIn := true
+    peEntry := peC
+
+// ───────── Output ─────────
+plot(netPnl, "Equity (Rs)", color = color.new(#26a69a, 0), linewidth = 2)
+plot(0, "Zero", color = color.new(#9e9e9e, 60))
+bgcolor(ceIn ? color.new(#26a69a, 90) : na, title = "CE in trade")
+bgcolor(peIn ? color.new(#ef5350, 90) : na, title = "PE in trade")
+pf = grossLoss > 0 ? grossWin / grossLoss : na
+var table t = table.new(position.top_right, 2, 12, border_width = 1)
+if barstate.islast
+    hb = color.new(#263238, 0)
+    table.cell(t, 0, 0, "OPP Daily ITM Simulator", text_color = color.white, bgcolor = hb, text_size = size.small)
+    table.cell(t, 1, 0, root + "  expiry " + expTxt, text_color = color.white, bgcolor = hb, text_size = size.small)
+    table.cell(t, 0, 1, "Today's contracts", text_size = size.small)
+    table.cell(t, 1, 1, ceSym + "  /  " + peSym + "  (open " + str.tostring(dayOpen, "#") + ")", text_size = size.small)
+    table.cell(t, 0, 2, "Data found", text_size = size.small)
+    table.cell(t, 1, 2, (na(ceC) ? "CE: no" : "CE: yes") + "   " + (na(peC) ? "PE: no" : "PE: yes"), text_size = size.small)
+    table.cell(t, 0, 3, "Trades (CE / PE)", text_size = size.small)
+    table.cell(t, 1, 3, str.tostring(nTrades) + "  (" + str.tostring(ceTrades) + " / " + str.tostring(peTrades) + ")", text_size = size.small)
+    table.cell(t, 0, 4, "Win rate", text_size = size.small)
+    table.cell(t, 1, 4, nTrades > 0 ? str.tostring(100.0 * nWins / nTrades, "#.#") + "%" : "-", text_size = size.small)
+    table.cell(t, 0, 5, "Profit factor", text_size = size.small)
+    table.cell(t, 1, 5, na(pf) ? "-" : str.tostring(pf, "#.##"), text_size = size.small)
+    table.cell(t, 0, 6, "Net PnL (Rs, after costs)", text_size = size.small)
+    table.cell(t, 1, 6, str.tostring(netPnl, "#"), text_color = netPnl >= 0 ? color.new(#26a69a, 0) : color.new(#ef5350, 0), text_size = size.small)
+    table.cell(t, 0, 7, "CE PnL / PE PnL", text_size = size.small)
+    table.cell(t, 1, 7, str.tostring(cePnl, "#") + " / " + str.tostring(pePnl, "#"), text_size = size.small)
+    table.cell(t, 0, 8, "Max drawdown (Rs)", text_size = size.small)
+    table.cell(t, 1, 8, str.tostring(maxDD, "#"), text_size = size.small)
+    table.cell(t, 0, 9, "Avg per trade (Rs)", text_size = size.small)
+    table.cell(t, 1, 9, nTrades > 0 ? str.tostring(netPnl / nTrades, "#") : "-", text_size = size.small)
+    table.cell(t, 0, 10, "Exits: target / VWAP / square-off", text_size = size.small)
+    table.cell(t, 1, 10, str.tostring(exitsTarget) + " / " + str.tostring(exitsVwap) + " / " + str.tostring(exitsSquare), text_size = size.small)
+    table.cell(t, 0, 11, "Rule", text_size = size.small)
+    table.cell(t, 1, 11, "buy close > green, exit close < green or +" + str.tostring(targetPts, "#") + " pts, " + str.tostring(lots) + " lot", text_size = size.small)
