@@ -1,8 +1,8 @@
 //@version=6
 // Option Pulse Pro (rebuild) — OVERLAY for an option contract's own chart (e.g. NSE:NIFTY261117C24900, 1-minute).
 // Components mirror the original:
-//   Institutional Breakout Zone  = anchored VWAP (green), anchored to the first bar of the contract's loaded data
-//                                  (this matched the paid indicator to within 0.1 on 9 Nov 2026)
+//   Institutional Breakout Zone  = monthly anchored VWAP (green): restarts on the first bar of each month
+//                                  (matches the paid indicator to all decimals on CE, PE and futures exports)
 //   Main Trend - ITM             = volume-weighted centre (elastic VWMA) ± factor × ATR, shown as the lower band while
 //                                  bullish (blue) and the upper band while bearish (pink); flips when close crosses it.
 //                                  Fitted to the paid indicator's exported CE and PE values with volume (EVWMA 62 of hlc3, ATR 14, factor 2.0).
@@ -16,7 +16,7 @@ indicator("Option Pulse Pro (rebuild)", shorttitle = "OPP", overlay = true, scal
 // ───────── Inputs ─────────
 grpM = "Main settings"
 showInst = input.bool(true, "Institutional Breakout Zone (anchored VWAP)", group = grpM)
-instAnchor = input.string("Contract", "VWAP anchor", options = ["Contract", "Session", "Week", "Month"], group = grpM, tooltip = "Contract = anchored to the first bar of loaded history, which is what the paid indicator does on every symbol. Its value depends on how much history TradingView has loaded.")
+instAnchor = input.string("Month", "VWAP anchor", options = ["Month", "Week", "Session", "Contract"], group = grpM, tooltip = "Month = VWAP restarts on the first bar of each month. This reproduced the paid line to all decimals on CE, PE and futures.")
 showMain = input.bool(true, "Main Trend - ITM (volume-weighted band)", group = grpM)
 mtLen = input.int(62, "Main Trend length (elastic VWMA of hlc3)", minval = 1, group = grpM)
 mtAtr = input.int(14, "Main Trend ATR period", minval = 1, group = grpM)
@@ -166,7 +166,7 @@ hb = showTable ? hdrBg : hide
 tc = showTable ? txtC : hide
 thisName = isOpt ? (thisIsCE ? "CE (this chart)" : "PE (this chart)") : "This chart"
 partnerName = isOpt ? (thisIsCE ? "PE (other leg)" : "CE (other leg)") : "Other leg"
-table.cell(dash, 0, 0, showTable ? "Option Pulse Pro v1.6" : "", text_color = tc, bgcolor = hb, text_size = size.small)
+table.cell(dash, 0, 0, showTable ? "Option Pulse Pro v1.7" : "", text_color = tc, bgcolor = hb, text_size = size.small)
 table.cell(dash, 1, 0, showTable ? thisName : "", text_color = tc, bgcolor = hb, text_size = size.small)
 table.cell(dash, 2, 0, showTable ? partnerName : "", text_color = tc, bgcolor = hb, text_size = size.small)
 table.cell(dash, 0, 1, showTable ? "Symbol" : "", text_color = tc, bgcolor = cb, text_size = size.small)
