@@ -82,15 +82,6 @@ var int exitsTarget = 0
 var int exitsVwap = 0
 var int exitsSquare = 0
 
-book(float pnl) =>
-    nTrades += 1
-    nWins += pnl > 0 ? 1 : 0
-    grossWin += pnl > 0 ? pnl : 0
-    grossLoss += pnl < 0 ? -pnl : 0
-    netPnl += pnl
-    peakPnl := math.max(peakPnl, netPnl)
-    maxDD := math.max(maxDD, peakPnl - netPnl)
-
 // CE leg
 var bool ceIn = false
 var float ceEntry = na
@@ -100,7 +91,13 @@ if ceIn
     if exitNow
         exitPx = hitTarget ? ceEntry + targetPts : nz(ceC, ceEntry)
         pnl = (exitPx - ceEntry) * unitsPerTrade - roundTripCost
-        book(pnl)
+        nTrades += 1
+        nWins += pnl > 0 ? 1 : 0
+        grossWin += pnl > 0 ? pnl : 0
+        grossLoss += pnl < 0 ? -pnl : 0
+        netPnl += pnl
+        peakPnl := math.max(peakPnl, netPnl)
+        maxDD := math.max(maxDD, peakPnl - netPnl)
         ceTrades += 1
         cePnl += pnl
         exitsTarget += hitTarget ? 1 : 0
@@ -120,7 +117,13 @@ if peIn
     if exitNowP
         exitPxP = hitTargetP ? peEntry + targetPts : nz(peC, peEntry)
         pnlP = (exitPxP - peEntry) * unitsPerTrade - roundTripCost
-        book(pnlP)
+        nTrades += 1
+        nWins += pnlP > 0 ? 1 : 0
+        grossWin += pnlP > 0 ? pnlP : 0
+        grossLoss += pnlP < 0 ? -pnlP : 0
+        netPnl += pnlP
+        peakPnl := math.max(peakPnl, netPnl)
+        maxDD := math.max(maxDD, peakPnl - netPnl)
         peTrades += 1
         pePnl += pnlP
         exitsTarget += hitTargetP ? 1 : 0
