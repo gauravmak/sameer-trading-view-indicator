@@ -43,6 +43,10 @@ Pine gets OI through a synthetic `<symbol>_OI` series. Tested 9 Nov 2026: availa
 
 Both scripts expose alert conditions (Long setup, Short setup, Premium decay, Any state change; the overlay also has Main Trend turned bullish/bearish). Create them from the chart's Alert dialog by choosing the indicator as the condition.
 
+## Other markets (crude, gold, silver, stocks, futures)
+
+The overlay's three drawings need only price and volume, so it works on any symbol and timeframe. On an option contract it also pairs the opposite leg and fills the CE/PE table; on anything else the table shows only this chart and the state reads ABOVE / BELOW / INSIDE ZONE. The VWAP anchor is automatic: first loaded bar on option contracts, session on everything else. Symbols without volume (e.g. a spot index) fall back to a plain EMA centre for the Main Trend. On a futures chart (`MCX:CRUDEOIL1!`) the OI row reads that contract's own OI. Lengths were fitted on Nifty options; other markets may want different lengths.
+
 ## Known gaps vs. the original
 
 - Main Trend parameters (EVWMA 62, ATR 14, factor 2.0) are fitted on 9 Nov CE and PE data with volume; the factor came out at exactly 2.000 on both legs. The cloud's EMA 9/21 is by eye, since the paid cloud lines are not exportable. Compare the overlay with the paid one on the same chart and tune in Settings until the lines sit on top of each other.

@@ -16,7 +16,7 @@ indicator("Option Pulse Pro (rebuild)", shorttitle = "OPP", overlay = true, scal
 // ───────── Inputs ─────────
 grpM = "Main settings"
 showInst = input.bool(true, "Institutional Breakout Zone (anchored VWAP)", group = grpM)
-instAnchor = input.string("Contract", "VWAP anchor", options = ["Contract", "Session", "Week", "Month"], group = grpM)
+instAnchor = input.string("Auto", "VWAP anchor", options = ["Auto", "Contract", "Session", "Week", "Month"], group = grpM, tooltip = "Auto = Contract (first loaded bar) on option contracts, Session on everything else.")
 showMain = input.bool(true, "Main Trend - ITM (volume-weighted band)", group = grpM)
 mtLen = input.int(62, "Main Trend length (elastic VWMA of hlc3)", minval = 1, group = grpM)
 mtAtr = input.int(14, "Main Trend ATR period", minval = 1, group = grpM)
@@ -68,15 +68,20 @@ partnerReq = isHA ? ticker.heikinashi(partnerSym) : partnerSym
 hasPartner = manPartner != "" or (autoPair and isOpt)
 autoRoot = str.contains(tkRaw, "BANKNIFTY") ? "BANKNIFTY" : str.contains(tkRaw, "FINNIFTY") ? "FINNIFTY" : str.contains(tkRaw, "MIDCPNIFTY") ? "MIDCPNIFTY" : str.contains(tkRaw, "SENSEX") ? "SENSEX" : str.contains(tkRaw, "NIFTY") ? "NIFTY" : tkRaw
 root = isOpt ? optRoot : autoRoot
-futSym = syminfo.prefix + ":" + root + futSuffix
+isFutChart = str.contains(tkRaw, "!")
+futSym = isFutChart ? stdId : syminfo.prefix + ":" + root + futSuffix
 
 // ───────── This leg ─────────
 newDay = timeframe.change("1D")
-anchorNow = instAnchor == "Contract" ? bar_index == 0 : instAnchor == "Session" ? newDay : instAnchor == "Week" ? timeframe.change("1W") : timeframe.change("1M")
+anchorUse = instAnchor == "Auto" ? (isOpt ? "Contract" : "Session") : instAnchor
+anchorNow = anchorUse == "Contract" ? bar_index == 0 : anchorUse == "Session" ? newDay : anchorUse == "Week" ? timeframe.change("1W") : timeframe.change("1M")
 inst = ta.vwap(hlc3, anchorNow)
-vSum = math.sum(volume, mtLen)
-var float mtCen = na
-mtCen := na(mtCen[1]) ? hlc3 : vSum > 0 ? mtCen[1] * (vSum - volume) / vSum + volume * hlc3 / vSum : mtCen[1]
+hasVol = not na(volume) and ta.cum(nz(volume)) > 0
+vSum = math.sum(nz(volume), mtLen)
+emaCen = ta.ema(hlc3, mtLen)
+var float vwCen = na
+vwCen := na(vwCen[1]) ? hlc3 : vSum > 0 ? vwCen[1] * (vSum - nz(volume)) / vSum + nz(volume) * hlc3 / vSum : vwCen[1]
+mtCen = hasVol ? vwCen : emaCen
 mtAtrV = ta.atr(mtAtr)
 mtUp = mtCen + mtFactor * mtAtrV
 mtLo = mtCen - mtFactor * mtAtrV
@@ -96,9 +101,12 @@ thisPos = zoneRef == "Institutional VWAP" ? posLine(close, inst) : zoneRef == "M
 // ───────── Opposite leg (same maths on its own chart; Heikin Ashi if this chart is) ─────────
 [pC, pH, pL, pV, pInst, pRunF, pRunS] = request.security(partnerReq, timeframe.period, [close, high, low, volume, ta.vwap(hlc3, anchorNow), ta.ema(close, runFast), ta.ema(close, runSlow)], ignore_invalid_symbol = true)
 pVsum = math.sum(nz(pV), mtLen)
-var float pCen = na
 pHLC3 = (pH + pL + pC) / 3
-pCen := na(pCen[1]) ? pHLC3 : pVsum > 0 ? pCen[1] * (pVsum - nz(pV)) / pVsum + nz(pV) * pHLC3 / pVsum : pCen[1]
+pHasVol = ta.cum(nz(pV)) > 0
+pEmaCen = ta.ema(pHLC3, mtLen)
+var float pVwCen = na
+pVwCen := na(pVwCen[1]) ? pHLC3 : pVsum > 0 ? pVwCen[1] * (pVsum - nz(pV)) / pVsum + nz(pV) * pHLC3 / pVsum : pVwCen[1]
+pCen = pHasVol ? pVwCen : pEmaCen
 pTR = math.max(pH - pL, math.abs(pH - nz(pC[1], pC)), math.abs(pL - nz(pC[1], pC)))
 pAtrV = ta.rma(pTR, mtAtr)
 pUp = pCen + mtFactor * pAtrV
@@ -158,7 +166,7 @@ hb = showTable ? hdrBg : hide
 tc = showTable ? txtC : hide
 thisName = isOpt ? (thisIsCE ? "CE (this chart)" : "PE (this chart)") : "This chart"
 partnerName = isOpt ? (thisIsCE ? "PE (other leg)" : "CE (other leg)") : "Other leg"
-table.cell(dash, 0, 0, showTable ? "Option Pulse Pro v1.4" : "", text_color = tc, bgcolor = hb, text_size = size.small)
+table.cell(dash, 0, 0, showTable ? "Option Pulse Pro v1.5" : "", text_color = tc, bgcolor = hb, text_size = size.small)
 table.cell(dash, 1, 0, showTable ? thisName : "", text_color = tc, bgcolor = hb, text_size = size.small)
 table.cell(dash, 2, 0, showTable ? partnerName : "", text_color = tc, bgcolor = hb, text_size = size.small)
 table.cell(dash, 0, 1, showTable ? "Symbol" : "", text_color = tc, bgcolor = cb, text_size = size.small)
