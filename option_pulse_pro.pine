@@ -30,6 +30,7 @@ showHL = input.bool(false, "Today's High/Low lines", group = grpM)
 zoneRef = input.string("Institutional VWAP", "Above/below zone is judged against", options = ["Institutional VWAP", "Main Trend", "Running Trend cloud"], group = grpM)
 grpP = "Opposite leg"
 autoPair = input.bool(true, "Auto-detect opposite leg from chart symbol", group = grpP)
+pairOffset = input.int(100, "Opposite-leg strike offset (paid method: PE strike = CE strike + 100)", minval = 0, step = 50, group = grpP, tooltip = "The paid method uses ~100-point ITM legs: at a 24970 open, the 24900 CE pairs with the 25000 PE. Set 0 to pair the same strike.")
 manPartner = input.string("", "Manual opposite-leg symbol (overrides)", group = grpP)
 grpO = "Open-interest confirmation (futures)"
 useFutOI = input.bool(true, "Confirm setups with futures OI", group = grpO)
@@ -62,7 +63,10 @@ optExp = isOpt ? str.substring(optPart, 0, 6) : ""
 optType = isOpt ? str.substring(optPart, 6, 7) : ""
 optStrike = isOpt ? str.substring(optPart, 7) : ""
 partnerType = optType == "C" ? "P" : "C"
-autoPartner = isOpt ? syminfo.prefix + ":" + optRoot + optExp + partnerType + optStrike : stdId
+optStrikeNum = isOpt ? str.tonumber(optStrike) : na
+partnerStrikeNum = optType == "C" ? optStrikeNum + pairOffset : optStrikeNum - pairOffset
+partnerStrike = isOpt ? str.tostring(partnerStrikeNum, "#") : ""
+autoPartner = isOpt ? syminfo.prefix + ":" + optRoot + optExp + partnerType + partnerStrike : stdId
 partnerSym = manPartner != "" ? manPartner : autoPair ? autoPartner : stdId
 partnerReq = isHA ? ticker.heikinashi(partnerSym) : partnerSym
 hasPartner = manPartner != "" or (autoPair and isOpt)
@@ -117,6 +121,15 @@ pStDir = float(pDirI)
 pStLine = pDirI == -1 ? pLo : pUp
 partnerPos = not hasPartner ? 0 : zoneRef == "Institutional VWAP" ? posLine(pC, pInst) : zoneRef == "Main Trend" ? posDir(pStDir) : posBand(pC, pRunF, pRunS)
 
+// ───────── Today's ITM pair from the index open (paid method) ─────────
+idxSym = isOpt ? syminfo.prefix + ":" + optRoot : stdId
+idxOpen = request.security(idxSym, "D", open, lookahead = barmerge.lookahead_on, ignore_invalid_symbol = true)
+sugCE = math.floor(idxOpen / 100) * 100
+sugPE0 = math.ceil(idxOpen / 100) * 100
+sugPE = sugPE0 == sugCE ? sugPE0 + 100 : sugPE0
+sugTxt = na(idxOpen) ? "n/a" : "CE " + str.tostring(sugCE, "#") + " / PE " + str.tostring(sugPE, "#") + "  (open " + str.tostring(idxOpen, "#") + ")"
+onSuggested = isOpt and (thisIsCE ? optStrikeNum == sugCE : optStrikeNum == sugPE)
+
 // ───────── Futures open interest ─────────
 futC = request.security(futSym, timeframe.period, close, ignore_invalid_symbol = true)
 futOI = request.security(futSym + "_OI", timeframe.period, close, ignore_invalid_symbol = true)
@@ -156,7 +169,7 @@ label.set_textcolor(lb, showLabel ? color.white : color.new(#000000, 100))
 
 // ───────── Table ─────────
 tPos = tablePos == "Top right" ? position.top_right : tablePos == "Top left" ? position.top_left : tablePos == "Bottom right" ? position.bottom_right : position.bottom_left
-var table dash = table.new(tPos, 3, 6, border_width = 1, border_color = color.new(#000000, 70))
+var table dash = table.new(tPos, 3, 7, border_width = 1, border_color = color.new(#000000, 70))
 hdrBg = color.new(#263238, 0)
 cellBg = color.new(#37474f, 20)
 txtC = color.white
@@ -166,7 +179,7 @@ hb = showTable ? hdrBg : hide
 tc = showTable ? txtC : hide
 thisName = isOpt ? (thisIsCE ? "CE (this chart)" : "PE (this chart)") : "This chart"
 partnerName = isOpt ? (thisIsCE ? "PE (other leg)" : "CE (other leg)") : "Other leg"
-table.cell(dash, 0, 0, showTable ? "Option Pulse Pro v1.7" : "", text_color = tc, bgcolor = hb, text_size = size.small)
+table.cell(dash, 0, 0, showTable ? "Option Pulse Pro v1.8" : "", text_color = tc, bgcolor = hb, text_size = size.small)
 table.cell(dash, 1, 0, showTable ? thisName : "", text_color = tc, bgcolor = hb, text_size = size.small)
 table.cell(dash, 2, 0, showTable ? partnerName : "", text_color = tc, bgcolor = hb, text_size = size.small)
 table.cell(dash, 0, 1, showTable ? "Symbol" : "", text_color = tc, bgcolor = cb, text_size = size.small)
@@ -181,9 +194,12 @@ table.cell(dash, 2, 3, showTable ? (hasPartner ? (pStDir < 0 ? "Bullish" : "Bear
 table.cell(dash, 0, 4, showTable ? "Position" : "", text_color = tc, bgcolor = cb, text_size = size.small)
 table.cell(dash, 1, 4, showTable ? posText(thisPos) : "", text_color = showTable ? (thisPos == 1 ? colUp : thisPos == -1 ? colDn : txtC) : hide, bgcolor = cb, text_size = size.small)
 table.cell(dash, 2, 4, showTable ? (hasPartner ? posText(partnerPos) : "-") : "", text_color = showTable ? (partnerPos == 1 ? colUp : partnerPos == -1 ? colDn : txtC) : hide, bgcolor = cb, text_size = size.small)
-table.cell(dash, 0, 5, showTable ? "Fut OI · STATE" : "", text_color = tc, bgcolor = hb, text_size = size.small)
-table.cell(dash, 1, 5, showTable ? futSym + " " + fmtOI(futOI) + " · " + futClass : "", text_color = tc, bgcolor = cb, text_size = size.small)
-table.cell(dash, 2, 5, showTable ? state : "", text_color = showTable ? color.white : hide, bgcolor = showTable ? stateCol : hide, text_size = size.small)
+table.cell(dash, 0, 5, showTable ? "Today's ITM pair" : "", text_color = tc, bgcolor = cb, text_size = size.small)
+table.cell(dash, 1, 5, showTable ? sugTxt : "", text_color = showTable ? (onSuggested or not isOpt ? txtC : color.new(#ffb300, 0)) : hide, bgcolor = cb, text_size = size.small)
+table.cell(dash, 2, 5, showTable ? (isOpt ? (onSuggested ? "this chart matches" : "this chart differs") : "-") : "", text_color = showTable ? (onSuggested or not isOpt ? txtC : color.new(#ffb300, 0)) : hide, bgcolor = cb, text_size = size.small)
+table.cell(dash, 0, 6, showTable ? "Fut OI · STATE" : "", text_color = tc, bgcolor = hb, text_size = size.small)
+table.cell(dash, 1, 6, showTable ? futSym + " " + fmtOI(futOI) + " · " + futClass : "", text_color = tc, bgcolor = cb, text_size = size.small)
+table.cell(dash, 2, 6, showTable ? state : "", text_color = showTable ? color.white : hide, bgcolor = showTable ? stateCol : hide, text_size = size.small)
 
 // ───────── Alerts ─────────
 stateChanged = state != state[1]

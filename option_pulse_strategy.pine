@@ -38,6 +38,7 @@ oiLookback = input.int(5, "OI / price change lookback (bars)", minval = 1, group
 futSuffix = input.string("1!", "Futures contract suffix", group = grpM)
 autoPair = input.bool(true, "Auto-detect opposite leg on option charts", group = grpM)
 manPartner = input.string("", "Manual opposite-leg symbol (overrides)", group = grpM)
+pairOffset = input.int(100, "Opposite-leg strike offset (PE strike = CE strike + offset)", minval = 0, step = 50, group = grpM)
 
 // ───────── Helpers ─────────
 oiClass(float p, float oi) => na(p - p[oiLookback]) or na(oi - oi[oiLookback]) ? "n/a" : p > p[oiLookback] and oi > oi[oiLookback] ? "Long buildup" : p > p[oiLookback] and oi < oi[oiLookback] ? "Short covering" : p < p[oiLookback] and oi > oi[oiLookback] ? "Short buildup" : p < p[oiLookback] and oi < oi[oiLookback] ? "Long unwinding" : "Flat"
@@ -56,7 +57,9 @@ optExp = isOpt ? str.substring(optPart, 0, 6) : ""
 optType = isOpt ? str.substring(optPart, 6, 7) : ""
 optStrike = isOpt ? str.substring(optPart, 7) : ""
 partnerType = optType == "C" ? "P" : "C"
-autoPartner = isOpt ? syminfo.prefix + ":" + optRoot + optExp + partnerType + optStrike : stdId
+optStrikeNum = isOpt ? str.tonumber(optStrike) : na
+partnerStrike = isOpt ? str.tostring(optType == "C" ? optStrikeNum + pairOffset : optStrikeNum - pairOffset, "#") : ""
+autoPartner = isOpt ? syminfo.prefix + ":" + optRoot + optExp + partnerType + partnerStrike : stdId
 partnerSym = manPartner != "" ? manPartner : autoPair ? autoPartner : stdId
 partnerReq = isHA ? ticker.heikinashi(partnerSym) : partnerSym
 hasPartner = manPartner != "" or (autoPair and isOpt)

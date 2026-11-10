@@ -21,6 +21,10 @@ The original's formulas are not public. The green zone line is a monthly anchore
 
 All scripts have **no indented lines** on purpose: Android browsers re-indent pasted lines, which breaks normal Pine code.
 
+## Which contracts to open (paid method)
+
+The paid method uses legs about 100 points in the money, chosen from the index open: call strike = open rounded **down** to the nearest 100, put strike = open rounded **up** to the nearest 100. At a 24970 open that is the 24900 CE and the 25000 PE. The overlay shows "Today's ITM pair" in its table and flags whether the chart you are on matches; the opposite leg is paired with a +100 offset by default (Settings → Opposite leg).
+
 ## Install
 
 1. TradingView → Pine Editor → New indicator → select all, delete, paste the raw file → **Add to chart**.
