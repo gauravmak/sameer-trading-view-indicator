@@ -9,8 +9,10 @@
 //
 // Entry: Main Trend flip (default) or pullback re-entry (close crosses back over the running line inside the trend).
 // Stop: the Main Trend line at entry. Target: risk × R:R (default 1:3). Optional exit on opposite flip and intraday square-off.
+// Backtest on REGULAR candles (not Heikin Ashi): HA closes are not tradeable prices.
+// Account: 20 lakh with 10% margin, so one NIFTY futures lot (~19 lakh notional) can be held.
 // This file uses normal indentation: paste it from a laptop, not a phone.
-strategy("Option Pulse Pro Strategy (rebuild)", shorttitle = "OPP-S", overlay = true, scale = scale.right, initial_capital = 200000, default_qty_type = strategy.fixed, default_qty_value = 1, commission_type = strategy.commission.cash_per_order, commission_value = 0, process_orders_on_close = true, pyramiding = 0, max_bars_back = 1000)
+strategy("Option Pulse Pro Strategy (rebuild)", shorttitle = "OPP-S", overlay = true, scale = scale.right, initial_capital = 2000000, default_qty_type = strategy.fixed, default_qty_value = 1, commission_type = strategy.commission.cash_per_order, commission_value = 0, process_orders_on_close = true, pyramiding = 0, margin_long = 10, margin_short = 10, max_bars_back = 1000)
 
 // ───────── Inputs ─────────
 grpB = "Backtest"

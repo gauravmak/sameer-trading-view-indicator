@@ -49,7 +49,7 @@ Both scripts expose alert conditions (Long setup, Short setup, Premium decay, An
 1. Pine Editor → paste `option_pulse_strategy.pine` → Add to chart → open the **Strategy Tester** tab at the bottom.
 2. On an option chart the test covers that contract's life only (a few weeks): there is no multi-year option history on TradingView.
 3. For a multi-year test use **NSE:NIFTY1!** (continuous futures) on 1-minute, set the From date, and turn on **Deep Backtesting** in the Strategy Tester (Premium plan). Long trades stand in for "buy CE", short trades for "buy PE".
-4. Defaults: 1 lot (75), R:R 1:3, entry on the Main Trend flip, exit on stop / target / opposite flip, no entries in the first 15 minutes, square-off 15:20.
+4. Defaults: 1 lot (75), R:R 1:3, entry on the Main Trend flip, exit on stop / target / opposite flip, no entries in the first 15 minutes, square-off 15:20. Account 20 lakh with 10% margin so a futures lot fits. Use regular candles, not Heikin Ashi, or the results are unrealistic.
 
 ## Other markets (crude, gold, silver, stocks, futures)
 
