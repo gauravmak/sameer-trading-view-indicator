@@ -22,6 +22,7 @@ maxEntries = input.int(1, "Max entries per leg per day", minval = 1, group = grp
 enterIfAbove = input.bool(true, "Enter at session start if already above the green line", group = grpR)
 entryBuf = input.float(0, "Entry buffer: close must be this many points above the line", minval = 0, step = 1, group = grpR)
 exitBuf = input.float(0, "Exit buffer: close must be this many points below the line", minval = 0, step = 1, group = grpR)
+requireOther = input.bool(true, "Require the other leg to be below its green line (CE buy needs PE below, PE buy needs CE below)", group = grpR)
 requireMT = input.bool(false, "Require that leg's Main Trend to be bullish (blue)", group = grpR)
 mtLen = input.int(62, "Main Trend length", minval = 1, group = grpR)
 mtAtr = input.int(14, "Main Trend ATR period", minval = 1, group = grpR)
@@ -87,6 +88,8 @@ ceBelow = ceC < ceVw - exitBuf
 peBelow = peC < peVw - exitBuf
 ceMtOk = not requireMT or ceDir == -1
 peMtOk = not requireMT or peDir == -1
+ceOtherOk = not requireOther or (not na(peC) and not na(peVw) and peC < peVw)
+peOtherOk = not requireOther or (not na(ceC) and not na(ceVw) and ceC < ceVw)
 // a cross is only valid inside the same day (the contract can change at the day boundary)
 canEnter = minsIn >= skipOpenMin and hhmm < noEntryAfterHHMM and hhmm < squareOffHHMM and barstate.isconfirmed
 firstEligible = minsIn >= skipOpenMin and minsIn[1] < skipOpenMin
@@ -138,7 +141,7 @@ if ceIn
         exitsVwap += not hitTarget and ceBelow ? 1 : 0
         exitsSquare += not hitTarget and not ceBelow ? 1 : 0
         ceIn := false
-if not ceIn and tradeCE and canEnter and ceCross and ceMtOk and ceEntriesToday < maxEntries
+if not ceIn and tradeCE and canEnter and ceCross and ceMtOk and ceOtherOk and ceEntriesToday < maxEntries
     ceIn := true
     ceEntry := ceC
     ceEntriesToday += 1
@@ -165,7 +168,7 @@ if peIn
         exitsVwap += not hitTargetP and peBelow ? 1 : 0
         exitsSquare += not hitTargetP and not peBelow ? 1 : 0
         peIn := false
-if not peIn and tradePE and canEnter and peCross and peMtOk and peEntriesToday < maxEntries
+if not peIn and tradePE and canEnter and peCross and peMtOk and peOtherOk and peEntriesToday < maxEntries
     peIn := true
     peEntry := peC
     peEntriesToday += 1
@@ -202,4 +205,4 @@ if barstate.islast
     table.cell(tbl, 0, 10, "Exits: target / VWAP / square-off", text_size = size.small)
     table.cell(tbl, 1, 10, str.tostring(exitsTarget) + " / " + str.tostring(exitsVwap) + " / " + str.tostring(exitsSquare), text_size = size.small)
     table.cell(tbl, 0, 11, "Rule", text_size = size.small)
-    table.cell(tbl, 1, 11, "buy close > green" + (entryBuf > 0 ? "+" + str.tostring(entryBuf, "#") : "") + ", exit close < green" + (exitBuf > 0 ? "-" + str.tostring(exitBuf, "#") : "") + " or +" + str.tostring(targetPts, "#") + " pts, max " + str.tostring(maxEntries) + "/day" + (requireMT ? ", MT blue" : "") + (enterIfAbove ? ", enter if above at start" : ""), text_size = size.small)
+    table.cell(tbl, 1, 11, "buy close > green" + (entryBuf > 0 ? "+" + str.tostring(entryBuf, "#") : "") + ", exit close < green" + (exitBuf > 0 ? "-" + str.tostring(exitBuf, "#") : "") + " or +" + str.tostring(targetPts, "#") + " pts, max " + str.tostring(maxEntries) + "/day" + (requireOther ? ", other leg below" : "") + (requireMT ? ", MT blue" : "") + (enterIfAbove ? ", enter if above at start" : ""), text_size = size.small)
