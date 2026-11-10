@@ -6,7 +6,8 @@
 //   Main Trend - ITM             = volume-weighted centre (elastic VWMA) ± factor × ATR, shown as the lower band while
 //                                  bullish (blue) and the upper band while bearish (pink); flips when close crosses it.
 //                                  Fitted to the paid indicator's exported CE and PE values with volume (EVWMA 62 of hlc3, ATR 14, factor 2.0).
-//   Running Trend - Pullback Zone = fast EMA pair with cloud (green when fast > slow, pink otherwise)
+//   Running Trend - Pullback Zone = fast EMA pair with a small cloud (green when fast > slow, pink otherwise), plus the
+//                                  pullback wedge filled between the Main Trend line and the fast EMA (green bull / pink bear)
 //   Today's High/Low lines (optional), background colour
 // Extra: finds the opposite leg (same strike & expiry, CE<->PE) and shows the combined CE/PE state with futures OI.
 // Zero indented lines on purpose, so it survives pasting from a phone browser.
@@ -21,6 +22,7 @@ mtLen = input.int(62, "Main Trend length (elastic VWMA of hlc3)", minval = 1, gr
 mtAtr = input.int(14, "Main Trend ATR period", minval = 1, group = grpM)
 mtFactor = input.float(2.0, "Main Trend ATR factor", minval = 0.1, step = 0.1, group = grpM)
 showRun = input.bool(true, "Running Trend - Pullback Zone (EMA pair + cloud)", group = grpM)
+showWedge = input.bool(true, "Pullback wedge (fill between Main Trend and fast EMA)", group = grpM)
 runFast = input.int(9, "Running Trend fast EMA", minval = 1, group = grpM)
 runSlow = input.int(21, "Running Trend slow EMA", minval = 1, group = grpM)
 showHL = input.bool(false, "Today's High/Low lines", group = grpM)
@@ -126,10 +128,12 @@ stateCol = state == "LONG SETUP" ? colUp : state == "SHORT SETUP" ? colDn : stat
 
 // ───────── Drawing ─────────
 plot(showInst ? inst : na, "Institutional Breakout Zone", color = color.new(#43a047, 0), linewidth = 2)
-plot(showMain ? stLine : na, "Main Trend - ITM", color = stDir < 0 ? color.new(#1e88e5, 0) : color.new(#ec407a, 0), linewidth = 2, style = plot.style_linebr)
+plMain = plot(showMain ? stLine : na, "Main Trend - ITM", color = stDir < 0 ? color.new(#1e88e5, 0) : color.new(#ec407a, 0), linewidth = 2, style = plot.style_linebr)
 plRunF = plot(showRun ? runF : na, "Running Trend fast", color = color.new(#80cbc4, 0), linewidth = 1)
 plRunS = plot(showRun ? runS : na, "Running Trend slow", color = color.new(#f8bbd0, 0), linewidth = 1)
-fill(plRunF, plRunS, color = showRun ? (runUp ? color.new(#26a69a, 75) : color.new(#ef5350, 75)) : na, title = "Pullback zone cloud")
+plWedge = plot(showWedge ? runF : na, "Pullback wedge edge", color = color.new(#000000, 100), display = display.none)
+fill(plMain, plWedge, color = showWedge and showMain ? (stDir < 0 ? color.new(#26a69a, 85) : color.new(#ef5350, 85)) : na, title = "Pullback wedge")
+fill(plRunF, plRunS, color = showRun ? (runUp ? color.new(#26a69a, 70) : color.new(#ef5350, 70)) : na, title = "Running trend cloud")
 plot(showHL ? dayH : na, "Today's high", color = color.new(#ffb300, 0), style = plot.style_stepline)
 plot(showHL ? dayL : na, "Today's low", color = color.new(#ffb300, 0), style = plot.style_stepline)
 bgcolor(showBg ? (thisPos == 1 ? color.new(#26a69a, 88) : thisPos == -1 ? color.new(#ef5350, 88) : na) : na, title = "Background")
