@@ -51,6 +51,19 @@ Both scripts expose alert conditions (Long setup, Short setup, Premium decay, An
 3. For a multi-year test use **NSE:NIFTY1!** (continuous futures) on 1-minute, set the From date, and turn on **Deep Backtesting** in the Strategy Tester (Premium plan). Long trades stand in for "buy CE", short trades for "buy PE".
 4. Defaults: 1 lot (75), R:R 1:3, entry on the Main Trend flip, exit on stop / target / opposite flip, no entries in the first 15 minutes, square-off 15:20. Account 20 lakh with 10% margin so a futures lot fits. Use regular candles, not Heikin Ashi, or the results are unrealistic.
 
+## Backtest results (NSE:NIFTY1!, regular candles, Jan 2023 – Nov 2026, Deep Backtesting, 1 lot, Rs 40/order + 1 tick slippage)
+
+| Run | Timeframe | Entry | Exit | R:R | Trades | Win rate | Profit factor | Net |
+|---|---|---|---|---|---|---|---|---|
+| 1 | 1-min | Main Trend flip | stop / target / flip | 1:3 | 2,988 | 30% | 0.99 | −1.1 lakh |
+| B | 5-min | Pullback re-entry | stop / target / flip | 1:2 | 2,819 | 39% | 0.99 | −1.5 lakh |
+| A | 5-min | Main Trend flip | stop / target / flip | 1:2 | 1,216 | 38% | 0.93 | −4.2 lakh |
+| C | 5-min | Pullback re-entry | stop / target | 1:2 | 2,554 | 41% | 1.00 | +0.06 lakh |
+
+Max drawdown 25–30% in every run; buy and hold made +7.5 lakh over the same period. A Heikin Ashi chart showed +13.7 lakh for run 1, which is an artefact of HA's untradeable prices.
+
+**Conclusion:** the mechanical signals (Main Trend flip or pullback with the CE/PE state) have no edge on Nifty after costs. Use the overlay as a visual aid with manual decisions; do not connect it to a broker. Further parameter tuning would only overfit.
+
 ## Other markets (crude, gold, silver, stocks, futures)
 
 The overlay's three drawings need only price and volume, so it works on any symbol and timeframe. On an option contract it also pairs the opposite leg and fills the CE/PE table; on anything else the table shows only this chart and the state reads ABOVE / BELOW / INSIDE ZONE. The VWAP anchor is automatic: first loaded bar on option contracts, session on everything else. Symbols without volume (e.g. a spot index) fall back to a plain EMA centre for the Main Trend. On a futures chart (`MCX:CRUDEOIL1!`) the OI row reads that contract's own OI. Lengths were fitted on Nifty options; other markets may want different lengths.
