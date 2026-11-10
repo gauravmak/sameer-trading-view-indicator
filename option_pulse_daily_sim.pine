@@ -18,6 +18,14 @@ tradeCE = input.bool(true, "Trade the call", group = grpC)
 tradePE = input.bool(true, "Trade the put", group = grpC)
 grpR = "Rule"
 targetPts = input.float(40, "Target in premium points", minval = 1, step = 5, group = grpR)
+maxEntries = input.int(1, "Max entries per leg per day", minval = 1, group = grpR)
+enterIfAbove = input.bool(true, "Enter at session start if already above the green line", group = grpR)
+entryBuf = input.float(0, "Entry buffer: close must be this many points above the line", minval = 0, step = 1, group = grpR)
+exitBuf = input.float(0, "Exit buffer: close must be this many points below the line", minval = 0, step = 1, group = grpR)
+requireMT = input.bool(false, "Require that leg's Main Trend to be bullish (blue)", group = grpR)
+mtLen = input.int(62, "Main Trend length", minval = 1, group = grpR)
+mtAtr = input.int(14, "Main Trend ATR period", minval = 1, group = grpR)
+mtFactor = input.float(2.0, "Main Trend ATR factor", minval = 0.1, step = 0.1, group = grpR)
 lotUnits = input.int(75, "Units per lot (NIFTY 75)", minval = 1, group = grpR)
 lots = input.int(1, "Lots per trade", minval = 1, group = grpR)
 costPerOrder = input.float(40, "Cost per order (Rs)", minval = 0, group = grpR)
@@ -54,14 +62,40 @@ ceSym = ex + ":" + root + expTxt + "C" + str.tostring(ceK, "#")
 peSym = ex + ":" + root + expTxt + "P" + str.tostring(peK, "#")
 
 // ───────── Option prices and their green lines ─────────
-[ceC, ceVw] = request.security(ceSym, timeframe.period, [close, ta.vwap(hlc3, bar_index == 0 or timeframe.change("1M"))], ignore_invalid_symbol = true)
-[peC, peVw] = request.security(peSym, timeframe.period, [close, ta.vwap(hlc3, bar_index == 0 or timeframe.change("1M"))], ignore_invalid_symbol = true)
-ceAbove = ceC > ceVw
-peAbove = peC > peVw
+[ceC, ceH, ceL, ceV, ceVw] = request.security(ceSym, timeframe.period, [close, high, low, volume, ta.vwap(hlc3, bar_index == 0 or timeframe.change("1M"))], ignore_invalid_symbol = true)
+[peC, peH, peL, peV, peVw] = request.security(peSym, timeframe.period, [close, high, low, volume, ta.vwap(hlc3, bar_index == 0 or timeframe.change("1M"))], ignore_invalid_symbol = true)
+// Main Trend per leg (same maths as the overlay)
+ceHLC = (ceH + ceL + ceC) / 3
+ceVsum = math.sum(nz(ceV), mtLen)
+var float ceCen = na
+ceCen := na(ceCen[1]) ? ceHLC : ceVsum > 0 ? ceCen[1] * (ceVsum - nz(ceV)) / ceVsum + nz(ceV) * ceHLC / ceVsum : ceCen[1]
+ceTR = math.max(ceH - ceL, math.abs(ceH - nz(ceC[1], ceC)), math.abs(ceL - nz(ceC[1], ceC)))
+ceAtr = ta.rma(ceTR, mtAtr)
+var int ceDir = 1
+ceDir := nz(ceDir[1], 1) == 1 and ceC > ceCen + mtFactor * ceAtr ? -1 : nz(ceDir[1], 1) == -1 and ceC < ceCen - mtFactor * ceAtr ? 1 : nz(ceDir[1], 1)
+peHLC = (peH + peL + peC) / 3
+peVsum = math.sum(nz(peV), mtLen)
+var float peCen = na
+peCen := na(peCen[1]) ? peHLC : peVsum > 0 ? peCen[1] * (peVsum - nz(peV)) / peVsum + nz(peV) * peHLC / peVsum : peCen[1]
+peTR = math.max(peH - peL, math.abs(peH - nz(peC[1], peC)), math.abs(peL - nz(peC[1], peC)))
+peAtr = ta.rma(peTR, mtAtr)
+var int peDir = 1
+peDir := nz(peDir[1], 1) == 1 and peC > peCen + mtFactor * peAtr ? -1 : nz(peDir[1], 1) == -1 and peC < peCen - mtFactor * peAtr ? 1 : nz(peDir[1], 1)
+ceAbove = ceC > ceVw + entryBuf
+peAbove = peC > peVw + entryBuf
+ceBelow = ceC < ceVw - exitBuf
+peBelow = peC < peVw - exitBuf
+ceMtOk = not requireMT or ceDir == -1
+peMtOk = not requireMT or peDir == -1
 // a cross is only valid inside the same day (the contract can change at the day boundary)
-ceCross = ceAbove and not ceAbove[1] and not newDay and not na(ceC[1])
-peCross = peAbove and not peAbove[1] and not newDay and not na(peC[1])
 canEnter = minsIn >= skipOpenMin and hhmm < noEntryAfterHHMM and hhmm < squareOffHHMM and barstate.isconfirmed
+firstEligible = minsIn >= skipOpenMin and minsIn[1] < skipOpenMin
+ceCross = (ceAbove and not ceAbove[1] and not newDay and not na(ceC[1])) or (enterIfAbove and firstEligible and ceAbove)
+peCross = (peAbove and not peAbove[1] and not newDay and not na(peC[1])) or (enterIfAbove and firstEligible and peAbove)
+var int ceEntriesToday = 0
+var int peEntriesToday = 0
+ceEntriesToday := newDay ? 0 : ceEntriesToday
+peEntriesToday := newDay ? 0 : peEntriesToday
 isSquareOff = hhmm >= squareOffHHMM
 unitsPerTrade = lotUnits * lots
 roundTripCost = 2 * costPerOrder
@@ -87,7 +121,7 @@ var bool ceIn = false
 var float ceEntry = na
 if ceIn
     hitTarget = ceC >= ceEntry + targetPts
-    exitNow = hitTarget or ceC < ceVw or isSquareOff or na(ceC)
+    exitNow = hitTarget or ceBelow or isSquareOff or na(ceC)
     if exitNow
         exitPx = hitTarget ? ceEntry + targetPts : nz(ceC, ceEntry)
         pnl = (exitPx - ceEntry) * unitsPerTrade - roundTripCost
@@ -101,19 +135,20 @@ if ceIn
         ceTrades += 1
         cePnl += pnl
         exitsTarget += hitTarget ? 1 : 0
-        exitsVwap += not hitTarget and ceC < ceVw ? 1 : 0
-        exitsSquare += not hitTarget and not (ceC < ceVw) ? 1 : 0
+        exitsVwap += not hitTarget and ceBelow ? 1 : 0
+        exitsSquare += not hitTarget and not ceBelow ? 1 : 0
         ceIn := false
-if not ceIn and tradeCE and canEnter and ceCross
+if not ceIn and tradeCE and canEnter and ceCross and ceMtOk and ceEntriesToday < maxEntries
     ceIn := true
     ceEntry := ceC
+    ceEntriesToday += 1
 
 // PE leg
 var bool peIn = false
 var float peEntry = na
 if peIn
     hitTargetP = peC >= peEntry + targetPts
-    exitNowP = hitTargetP or peC < peVw or isSquareOff or na(peC)
+    exitNowP = hitTargetP or peBelow or isSquareOff or na(peC)
     if exitNowP
         exitPxP = hitTargetP ? peEntry + targetPts : nz(peC, peEntry)
         pnlP = (exitPxP - peEntry) * unitsPerTrade - roundTripCost
@@ -127,12 +162,13 @@ if peIn
         peTrades += 1
         pePnl += pnlP
         exitsTarget += hitTargetP ? 1 : 0
-        exitsVwap += not hitTargetP and peC < peVw ? 1 : 0
-        exitsSquare += not hitTargetP and not (peC < peVw) ? 1 : 0
+        exitsVwap += not hitTargetP and peBelow ? 1 : 0
+        exitsSquare += not hitTargetP and not peBelow ? 1 : 0
         peIn := false
-if not peIn and tradePE and canEnter and peCross
+if not peIn and tradePE and canEnter and peCross and peMtOk and peEntriesToday < maxEntries
     peIn := true
     peEntry := peC
+    peEntriesToday += 1
 
 // ───────── Output ─────────
 plot(netPnl, "Equity (Rs)", color = color.new(#26a69a, 0), linewidth = 2)
@@ -166,4 +202,4 @@ if barstate.islast
     table.cell(tbl, 0, 10, "Exits: target / VWAP / square-off", text_size = size.small)
     table.cell(tbl, 1, 10, str.tostring(exitsTarget) + " / " + str.tostring(exitsVwap) + " / " + str.tostring(exitsSquare), text_size = size.small)
     table.cell(tbl, 0, 11, "Rule", text_size = size.small)
-    table.cell(tbl, 1, 11, "buy close > green, exit close < green or +" + str.tostring(targetPts, "#") + " pts, " + str.tostring(lots) + " lot", text_size = size.small)
+    table.cell(tbl, 1, 11, "buy close > green" + (entryBuf > 0 ? "+" + str.tostring(entryBuf, "#") : "") + ", exit close < green" + (exitBuf > 0 ? "-" + str.tostring(exitBuf, "#") : "") + " or +" + str.tostring(targetPts, "#") + " pts, max " + str.tostring(maxEntries) + "/day" + (requireMT ? ", MT blue" : "") + (enterIfAbove ? ", enter if above at start" : ""), text_size = size.small)
