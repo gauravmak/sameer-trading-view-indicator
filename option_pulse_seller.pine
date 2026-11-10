@@ -1,0 +1,154 @@
+//@version=6
+// Option Pulse Pro SELLER (rebuild) — short-premium backtest on an OPTION chart (e.g. NSE:NIFTY261117C24900, 1-minute).
+// Same engine as the overlay: monthly VWAP, Main Trend (EVWMA ± 2·ATR band), Running line.
+//
+// Entry (sell this option): its Main Trend flips to bearish (pink) while the premium is below the monthly VWAP.
+//   Optional: require the opposite leg to be below its VWAP too (the "PREMIUM DECAY" state), and/or its Main Trend bearish.
+// Exit: stop when the premium rises X% above the sale price (default 50%), target when it falls Y% (default 50%),
+//   the Main Trend flipping back to bullish, or the intraday square-off. One position at a time.
+// Not simulated: the OTM hedge leg you should always buy when selling. Treat results as "naked short" numbers.
+// Backtest on REGULAR candles. Only a few weeks of history exist per contract: run it on several CE and PE charts.
+// This file uses normal indentation: paste it from a laptop, not a phone.
+strategy("Option Pulse Pro Seller (rebuild)", shorttitle = "OPP-SELL", overlay = true, scale = scale.right, initial_capital = 2000000, default_qty_type = strategy.fixed, default_qty_value = 1, commission_type = strategy.commission.cash_per_order, commission_value = 40, slippage = 1, process_orders_on_close = true, pyramiding = 0, margin_long = 100, margin_short = 15, max_bars_back = 1000)
+
+// ───────── Inputs ─────────
+grpB = "Backtest"
+fromDate = input.time(timestamp("2022-11-01 00:00 +0530"), "From", group = grpB)
+toDate = input.time(timestamp("2030-12-31 00:00 +0530"), "To", group = grpB)
+lotSize = input.int(75, "Quantity per trade (NIFTY lot = 75)", minval = 1, group = grpB)
+stopPct = input.float(50, "Stop: premium rises this % above sale price", minval = 5, step = 5, group = grpB)
+targetPct = input.float(50, "Target: premium falls this % below sale price (0 = no target)", minval = 0, step = 5, group = grpB)
+exitOnFlip = input.bool(true, "Also exit when Main Trend flips back to bullish", group = grpB)
+needBelowVwap = input.bool(true, "Entry needs premium below monthly VWAP", group = grpB)
+needPartnerDecay = input.bool(false, "Entry needs opposite leg below its VWAP too (PREMIUM DECAY state)", group = grpB)
+needPartnerBear = input.bool(false, "Entry needs opposite leg's Main Trend bearish too", group = grpB)
+grpS = "Session filter (IST)"
+skipOpenMin = input.int(15, "No entries in the first N minutes of the session", minval = 0, group = grpS)
+squareOff = input.bool(true, "Intraday square-off", group = grpS)
+squareOffHHMM = input.int(1515, "Square-off time (HHMM, no new entries after)", minval = 0, maxval = 2359, group = grpS)
+noEntryAfterHHMM = input.int(1430, "No new entries after (HHMM)", minval = 0, maxval = 2359, group = grpS)
+skipExpiryDay = input.bool(false, "Skip expiry day", group = grpS)
+onlyExpiryDay = input.bool(false, "Trade only on expiry day", group = grpS)
+grpM = "Engine (same defaults as the overlay)"
+mtLen = input.int(62, "Main Trend length (elastic VWMA of hlc3)", minval = 1, group = grpM)
+mtAtr = input.int(14, "Main Trend ATR period", minval = 1, group = grpM)
+mtFactor = input.float(2.0, "Main Trend ATR factor", minval = 0.1, step = 0.1, group = grpM)
+runFast = input.int(9, "Running Trend EMA length", minval = 1, group = grpM)
+pairOffset = input.int(100, "Opposite-leg strike offset (PE strike = CE strike + offset)", minval = 0, step = 50, group = grpM)
+manPartner = input.string("", "Manual opposite-leg symbol (overrides)", group = grpM)
+
+// ───────── Symbol parsing ─────────
+TZ = "Asia/Kolkata"
+tkRaw = str.upper(syminfo.ticker)
+stdId = ticker.standard(syminfo.tickerid)
+isHA = str.contains(syminfo.tickerid, "HeikenAshi")
+optMatchRaw = str.match(tkRaw, "\\d{6}[CP]\\d+$")
+optPart = na(optMatchRaw) ? "" : optMatchRaw
+isOpt = str.length(optPart) > 7
+optRoot = isOpt ? str.substring(tkRaw, 0, str.length(tkRaw) - str.length(optPart)) : ""
+optExp = isOpt ? str.substring(optPart, 0, 6) : ""
+optType = isOpt ? str.substring(optPart, 6, 7) : ""
+optStrike = isOpt ? str.substring(optPart, 7) : ""
+thisIsCE = optType != "P"
+partnerType = optType == "C" ? "P" : "C"
+optStrikeNum = isOpt ? str.tonumber(optStrike) : na
+partnerStrike = isOpt ? str.tostring(optType == "C" ? optStrikeNum + pairOffset : optStrikeNum - pairOffset, "#") : ""
+autoPartner = isOpt ? syminfo.prefix + ":" + optRoot + optExp + partnerType + partnerStrike : stdId
+partnerSym = manPartner != "" ? manPartner : autoPartner
+partnerReq = isHA ? ticker.heikinashi(partnerSym) : partnerSym
+hasPartner = manPartner != "" or isOpt
+
+// ───────── Engine: this chart ─────────
+newDay = timeframe.change("1D")
+inst = ta.vwap(hlc3, timeframe.change("1M"))
+hasVol = not na(volume) and ta.cum(nz(volume)) > 0
+vSum = math.sum(nz(volume), mtLen)
+emaCen = ta.ema(hlc3, mtLen)
+var float vwCen = na
+vwCen := na(vwCen[1]) ? hlc3 : vSum > 0 ? vwCen[1] * (vSum - nz(volume)) / vSum + nz(volume) * hlc3 / vSum : vwCen[1]
+mtCen = hasVol ? vwCen : emaCen
+mtAtrV = ta.atr(mtAtr)
+mtUp = mtCen + mtFactor * mtAtrV
+mtLo = mtCen - mtFactor * mtAtrV
+var int mtDir = 1
+mtDir := nz(mtDir[1], 1) == 1 and close > mtUp ? -1 : nz(mtDir[1], 1) == -1 and close < mtLo ? 1 : nz(mtDir[1], 1)
+stLine = mtDir == -1 ? mtLo : mtUp
+runF = ta.ema(close, runFast)
+
+// ───────── Engine: opposite leg ─────────
+[pC, pH, pL, pV, pInst] = request.security(partnerReq, timeframe.period, [close, high, low, volume, ta.vwap(hlc3, timeframe.change("1M"))], ignore_invalid_symbol = true)
+pVsum = math.sum(nz(pV), mtLen)
+pHLC3 = (pH + pL + pC) / 3
+var float pCen = na
+pCen := na(pCen[1]) ? pHLC3 : pVsum > 0 ? pCen[1] * (pVsum - nz(pV)) / pVsum + nz(pV) * pHLC3 / pVsum : pCen[1]
+pTR = math.max(pH - pL, math.abs(pH - nz(pC[1], pC)), math.abs(pL - nz(pC[1], pC)))
+pAtrV = ta.rma(pTR, mtAtr)
+var int pDir = 1
+pDir := nz(pDir[1], 1) == 1 and pC > pCen + mtFactor * pAtrV ? -1 : nz(pDir[1], 1) == -1 and pC < pCen - mtFactor * pAtrV ? 1 : nz(pDir[1], 1)
+partnerBelowVwap = hasPartner and not na(pC) and not na(pInst) and pC < pInst
+partnerBear = hasPartner and pDir == 1
+
+// ───────── Timing ─────────
+var int sessStart = na
+sessStart := newDay ? time : sessStart
+minsIn = na(sessStart) ? 999 : (time - sessStart) / 60000
+hhmm = hour(time, TZ) * 100 + minute(time, TZ)
+afterSquareOff = squareOff and hhmm >= squareOffHHMM
+todayTxt = str.tostring(year(time, TZ) % 100, "00") + str.tostring(month(time, TZ), "00") + str.tostring(dayofmonth(time, TZ), "00")
+isExpiryDay = isOpt and todayTxt == optExp
+dayOk = (not skipExpiryDay or not isExpiryDay) and (not onlyExpiryDay or isExpiryDay)
+inRange = time >= fromDate and time <= toDate
+canEnter = isOpt and inRange and dayOk and minsIn >= skipOpenMin and hhmm < noEntryAfterHHMM and not afterSquareOff and barstate.isconfirmed
+
+// ───────── Signal ─────────
+flipBear = mtDir == 1 and mtDir[1] == -1
+flipBull = mtDir == -1 and mtDir[1] == 1
+condVwap = not needBelowVwap or close < inst
+condPartner = (not needPartnerDecay or partnerBelowVwap) and (not needPartnerBear or partnerBear)
+sigSell = flipBear and condVwap and condPartner
+
+// ───────── Orders ─────────
+var float entryPx = na
+var float stopPx = na
+var float targetPx = na
+if canEnter and strategy.position_size == 0 and sigSell
+    entryPx := close
+    stopPx := close * (1 + stopPct / 100)
+    targetPx := targetPct > 0 ? close * (1 - targetPct / 100) : na
+    strategy.entry("Sell", strategy.short, qty = lotSize)
+    strategy.exit("Sell-exit", from_entry = "Sell", stop = stopPx, limit = targetPx)
+if exitOnFlip and strategy.position_size < 0 and flipBull
+    strategy.close("Sell", comment = "flip")
+if afterSquareOff and strategy.position_size != 0
+    strategy.close_all(comment = "square-off")
+
+// ───────── Diagnostics ─────────
+var int nFlips = 0
+var int nSigs = 0
+nFlips += flipBear and inRange ? 1 : 0
+nSigs += sigSell and inRange ? 1 : 0
+var table diag = table.new(position.top_right, 2, 7, border_width = 1)
+if barstate.islast
+    table.cell(diag, 0, 0, "OPP Seller", text_color = color.white, bgcolor = color.new(#263238, 0), text_size = size.small)
+    table.cell(diag, 1, 0, isOpt ? (thisIsCE ? "CE chart" : "PE chart") : "NOT an option chart: no trades", text_color = color.white, bgcolor = color.new(#263238, 0), text_size = size.small)
+    table.cell(diag, 0, 1, "Opposite leg", text_size = size.small)
+    table.cell(diag, 1, 1, hasPartner ? partnerSym : "-", text_size = size.small)
+    table.cell(diag, 0, 2, "Bearish flips", text_size = size.small)
+    table.cell(diag, 1, 2, str.tostring(nFlips), text_size = size.small)
+    table.cell(diag, 0, 3, "Sell signals", text_size = size.small)
+    table.cell(diag, 1, 3, str.tostring(nSigs), text_size = size.small)
+    table.cell(diag, 0, 4, "Trades taken", text_size = size.small)
+    table.cell(diag, 1, 4, str.tostring(strategy.closedtrades + strategy.opentrades), text_size = size.small)
+    table.cell(diag, 0, 5, "Expiry day today", text_size = size.small)
+    table.cell(diag, 1, 5, isExpiryDay ? "yes" : "no", text_size = size.small)
+    table.cell(diag, 0, 6, "Open trade", text_size = size.small)
+    table.cell(diag, 1, 6, strategy.position_size < 0 ? "sold @ " + str.tostring(entryPx, format.mintick) + "  stop " + str.tostring(stopPx, format.mintick) : "none", text_size = size.small)
+
+// ───────── Drawing ─────────
+plot(inst, "Institutional Breakout Zone", color = color.new(#43a047, 0), linewidth = 2)
+plMain = plot(stLine, "Main Trend - ITM", color = mtDir < 0 ? color.new(#1e88e5, 0) : color.new(#ec407a, 0), linewidth = 2, style = plot.style_linebr)
+plRun = plot(runF, "Running Trend", color = mtDir < 0 ? color.new(#26a69a, 30) : color.new(#ef5350, 30), linewidth = 1)
+fill(plMain, plRun, color = mtDir < 0 ? color.new(#26a69a, 85) : color.new(#ef5350, 85), title = "Pullback wedge")
+plot(strategy.position_size != 0 ? stopPx : na, "Stop", color = color.new(#ef5350, 0), style = plot.style_linebr)
+plot(strategy.position_size != 0 ? targetPx : na, "Target", color = color.new(#26a69a, 0), style = plot.style_linebr)
+bgcolor(sigSell ? color.new(#ef5350, 85) : na, title = "Sell signal")
