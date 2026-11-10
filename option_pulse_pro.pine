@@ -62,6 +62,7 @@ optRoot = isOpt ? str.substring(tkRaw, 0, str.length(tkRaw) - str.length(optPart
 optExp = isOpt ? str.substring(optPart, 0, 6) : ""
 optType = isOpt ? str.substring(optPart, 6, 7) : ""
 optStrike = isOpt ? str.substring(optPart, 7) : ""
+thisIsCE = optType != "P"
 partnerType = optType == "C" ? "P" : "C"
 optStrikeNum = isOpt ? str.tonumber(optStrike) : na
 partnerStrikeNum = optType == "C" ? optStrikeNum + pairOffset : optStrikeNum - pairOffset
@@ -138,7 +139,6 @@ bullOI = not useFutOI or futClass == "Long buildup" or futClass == "Short coveri
 bearOI = not useFutOI or futClass == "Short buildup" or futClass == "Long unwinding"
 
 // ───────── Combined CE/PE state ─────────
-thisIsCE = optType != "P"
 cePos = thisIsCE ? thisPos : partnerPos
 pePos = thisIsCE ? partnerPos : thisPos
 zoneBias = not hasPartner ? 0 : cePos == 1 and pePos == -1 ? 1 : pePos == 1 and cePos == -1 ? -1 : cePos == -1 and pePos == -1 ? 2 : 0
@@ -179,7 +179,7 @@ hb = showTable ? hdrBg : hide
 tc = showTable ? txtC : hide
 thisName = isOpt ? (thisIsCE ? "CE (this chart)" : "PE (this chart)") : "This chart"
 partnerName = isOpt ? (thisIsCE ? "PE (other leg)" : "CE (other leg)") : "Other leg"
-table.cell(dash, 0, 0, showTable ? "Option Pulse Pro v1.8" : "", text_color = tc, bgcolor = hb, text_size = size.small)
+table.cell(dash, 0, 0, showTable ? "Option Pulse Pro v1.9" : "", text_color = tc, bgcolor = hb, text_size = size.small)
 table.cell(dash, 1, 0, showTable ? thisName : "", text_color = tc, bgcolor = hb, text_size = size.small)
 table.cell(dash, 2, 0, showTable ? partnerName : "", text_color = tc, bgcolor = hb, text_size = size.small)
 table.cell(dash, 0, 1, showTable ? "Symbol" : "", text_color = tc, bgcolor = cb, text_size = size.small)
