@@ -54,7 +54,7 @@ Both scripts expose alert conditions (Long setup, Short setup, Premium decay, An
 1. Pine Editor → paste `option_pulse_strategy.pine` → Add to chart → open the **Strategy Tester** tab at the bottom.
 2. On an option chart the test covers that contract's life only (a few weeks): there is no multi-year option history on TradingView.
 3. For a multi-year test use **NSE:NIFTY1!** (continuous futures) on 1-minute, set the From date, and turn on **Deep Backtesting** in the Strategy Tester (Premium plan). Long trades stand in for "buy CE", short trades for "buy PE".
-4. Defaults: 1 lot (75), R:R 1:3, entry on the Main Trend flip, exit on stop / target / opposite flip, no entries in the first 15 minutes, square-off 15:20. Account 20 lakh with 10% margin so a futures lot fits. Use regular candles, not Heikin Ashi, or the results are unrealistic.
+4. Defaults: 1 lot (on NSE charts TradingView counts one contract as one lot, so quantity 1 = 75 units), R:R 1:3, entry on the Main Trend flip, exit on stop / target / opposite flip, no entries in the first 15 minutes, square-off 15:20. Account 20 lakh with 10% margin so a futures lot fits. Use regular candles, not Heikin Ashi, or the results are unrealistic.
 
 ## Backtest results (NSE:NIFTY1!, regular candles, Jan 2023 – Nov 2026, Deep Backtesting, 1 lot, Rs 40/order + 1 tick slippage)
 
@@ -65,7 +65,7 @@ Both scripts expose alert conditions (Long setup, Short setup, Premium decay, An
 | A | 5-min | Main Trend flip | stop / target / flip | 1:2 | 1,216 | 38% | 0.93 | −4.2 lakh |
 | C | 5-min | Pullback re-entry | stop / target | 1:2 | 2,554 | 41% | 1.00 | +0.06 lakh |
 
-Max drawdown 25–30% in every run; buy and hold made +7.5 lakh over the same period. A Heikin Ashi chart showed +13.7 lakh for run 1, which is an artefact of HA's untradeable prices.
+Max drawdown 25–30% in every run; buy and hold made +7.5 lakh over the same period. Note: these runs used quantity 75, which on TradingView's NSE futures means 75 lots; percentages and profit factors are unaffected, rupee figures are 75× one lot. A Heikin Ashi chart showed +13.7 lakh for run 1, which is an artefact of HA's untradeable prices.
 
 **Conclusion:** the mechanical signals (Main Trend flip or pullback with the CE/PE state) have no edge on Nifty after costs. Use the overlay as a visual aid with manual decisions; do not connect it to a broker. Further parameter tuning would only overfit.
 

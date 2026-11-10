@@ -15,7 +15,7 @@ strategy("Option Pulse Pro Seller (rebuild)", shorttitle = "OPP-SELL", overlay =
 grpB = "Backtest"
 fromDate = input.time(timestamp("2022-11-01 00:00 +0530"), "From", group = grpB)
 toDate = input.time(timestamp("2030-12-31 00:00 +0530"), "To", group = grpB)
-lotSize = input.int(75, "Quantity per trade (NIFTY lot = 75)", minval = 1, group = grpB)
+lotSize = input.int(1, "Lots per trade (on NSE charts TradingView counts 1 contract = 1 lot)", minval = 1, group = grpB)
 stopPct = input.float(50, "Stop: premium rises this % above sale price", minval = 5, step = 5, group = grpB)
 targetPct = input.float(50, "Target: premium falls this % below sale price (0 = no target)", minval = 0, step = 5, group = grpB)
 exitOnFlip = input.bool(true, "Also exit when Main Trend flips back to bullish", group = grpB)
@@ -128,12 +128,14 @@ var int nFlips = 0
 var int nSigs = 0
 nFlips += flipBear and inRange ? 1 : 0
 nSigs += sigSell and inRange ? 1 : 0
-var table diag = table.new(position.top_right, 2, 7, border_width = 1)
+var table diag = table.new(position.top_right, 2, 8, border_width = 1)
 if barstate.islast
     table.cell(diag, 0, 0, "OPP Seller", text_color = color.white, bgcolor = color.new(#263238, 0), text_size = size.small)
     table.cell(diag, 1, 0, isOpt ? (thisIsCE ? "CE chart" : "PE chart") : "NOT an option chart: no trades", text_color = color.white, bgcolor = color.new(#263238, 0), text_size = size.small)
-    table.cell(diag, 0, 1, "Opposite leg", text_size = size.small)
-    table.cell(diag, 1, 1, hasPartner ? partnerSym : "-", text_size = size.small)
+    table.cell(diag, 0, 1, "Point value / lot", text_size = size.small)
+    table.cell(diag, 1, 1, str.tostring(syminfo.pointvalue) + " per point per contract", text_size = size.small)
+    table.cell(diag, 0, 7, "Opposite leg", text_size = size.small)
+    table.cell(diag, 1, 7, hasPartner ? partnerSym : "-", text_size = size.small)
     table.cell(diag, 0, 2, "Bearish flips", text_size = size.small)
     table.cell(diag, 1, 2, str.tostring(nFlips), text_size = size.small)
     table.cell(diag, 0, 3, "Sell signals", text_size = size.small)
