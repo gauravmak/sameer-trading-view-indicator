@@ -21,7 +21,9 @@ targetPts = input.float(40, "Target in premium points", minval = 1, step = 5, gr
 maxEntries = input.int(1, "Max entries per leg per day", minval = 1, group = grpR)
 enterIfAbove = input.bool(true, "Enter at session start if already above the green line", group = grpR)
 entryBuf = input.float(0, "Entry buffer: close must be this many points above the line", minval = 0, step = 1, group = grpR)
-exitBuf = input.float(0, "Exit buffer: close must be this many points below the line", minval = 0, step = 1, group = grpR)
+stopSrc = input.string("OPP Main Trend line (blue)", "Stop line", options = ["OPP Main Trend line (blue)", "Green line (VWAP)"], group = grpR)
+stopTrig = input.string("Price goes below (low)", "Stop trigger", options = ["Price goes below (low)", "Close below"], group = grpR)
+exitBuf = input.float(0, "Exit buffer: price must be this many points below the stop line", minval = 0, step = 1, group = grpR)
 requireOther = input.bool(true, "Require the other leg to be below its green line (CE buy needs PE below, PE buy needs CE below)", group = grpR)
 requireMT = input.bool(false, "Require that leg's Main Trend to be bullish (blue)", group = grpR)
 mtLen = input.int(62, "Main Trend length", minval = 1, group = grpR)
@@ -84,8 +86,10 @@ var int peDir = 1
 peDir := nz(peDir[1], 1) == 1 and peC > peCen + mtFactor * peAtr ? -1 : nz(peDir[1], 1) == -1 and peC < peCen - mtFactor * peAtr ? 1 : nz(peDir[1], 1)
 ceAbove = ceC > ceVw + entryBuf
 peAbove = peC > peVw + entryBuf
-ceBelow = ceC < ceVw - exitBuf
-peBelow = peC < peVw - exitBuf
+ceStopLine = (stopSrc == "Green line (VWAP)" ? ceVw : ceCen - mtFactor * ceAtr) - exitBuf
+peStopLine = (stopSrc == "Green line (VWAP)" ? peVw : peCen - mtFactor * peAtr) - exitBuf
+ceBelow = stopTrig == "Close below" ? ceC < ceStopLine : ceL < ceStopLine
+peBelow = stopTrig == "Close below" ? peC < peStopLine : peL < peStopLine
 ceMtOk = not requireMT or ceDir == -1
 peMtOk = not requireMT or peDir == -1
 ceOtherOk = not requireOther or (not na(peC) and not na(peVw) and peC < peVw)
@@ -126,7 +130,7 @@ if ceIn
     hitTarget = ceC >= ceEntry + targetPts
     exitNow = hitTarget or ceBelow or isSquareOff or na(ceC)
     if exitNow
-        exitPx = hitTarget ? ceEntry + targetPts : nz(ceC, ceEntry)
+        exitPx = hitTarget ? ceEntry + targetPts : ceBelow ? math.min(ceStopLine + exitBuf, nz(ceC, ceEntry)) : nz(ceC, ceEntry)
         pnl = (exitPx - ceEntry) * unitsPerTrade - roundTripCost
         nTrades += 1
         nWins += pnl > 0 ? 1 : 0
@@ -153,7 +157,7 @@ if peIn
     hitTargetP = peC >= peEntry + targetPts
     exitNowP = hitTargetP or peBelow or isSquareOff or na(peC)
     if exitNowP
-        exitPxP = hitTargetP ? peEntry + targetPts : nz(peC, peEntry)
+        exitPxP = hitTargetP ? peEntry + targetPts : peBelow ? math.min(peStopLine + exitBuf, nz(peC, peEntry)) : nz(peC, peEntry)
         pnlP = (exitPxP - peEntry) * unitsPerTrade - roundTripCost
         nTrades += 1
         nWins += pnlP > 0 ? 1 : 0
@@ -202,7 +206,7 @@ if barstate.islast
     table.cell(tbl, 1, 8, str.tostring(maxDD, "#"), text_size = size.small)
     table.cell(tbl, 0, 9, "Avg per trade (Rs)", text_size = size.small)
     table.cell(tbl, 1, 9, nTrades > 0 ? str.tostring(netPnl / nTrades, "#") : "-", text_size = size.small)
-    table.cell(tbl, 0, 10, "Exits: target / VWAP / square-off", text_size = size.small)
+    table.cell(tbl, 0, 10, "Exits: target / stop / square-off", text_size = size.small)
     table.cell(tbl, 1, 10, str.tostring(exitsTarget) + " / " + str.tostring(exitsVwap) + " / " + str.tostring(exitsSquare), text_size = size.small)
     table.cell(tbl, 0, 11, "Rule", text_size = size.small)
-    table.cell(tbl, 1, 11, "buy close > green" + (entryBuf > 0 ? "+" + str.tostring(entryBuf, "#") : "") + ", exit close < green" + (exitBuf > 0 ? "-" + str.tostring(exitBuf, "#") : "") + " or +" + str.tostring(targetPts, "#") + " pts, max " + str.tostring(maxEntries) + "/day" + (requireOther ? ", other leg below" : "") + (requireMT ? ", MT blue" : "") + (enterIfAbove ? ", enter if above at start" : ""), text_size = size.small)
+    table.cell(tbl, 1, 11, "buy close > green" + (entryBuf > 0 ? "+" + str.tostring(entryBuf, "#") : "") + ", stop " + (stopSrc == "Green line (VWAP)" ? "green" : "OPP blue") + (stopTrig == "Close below" ? " (close)" : " (touch)") + (exitBuf > 0 ? "-" + str.tostring(exitBuf, "#") : "") + " or +" + str.tostring(targetPts, "#") + " pts, max " + str.tostring(maxEntries) + "/day" + (requireOther ? ", other leg below" : "") + (requireMT ? ", MT blue" : "") + (enterIfAbove ? ", enter if above at start" : ""), text_size = size.small)
