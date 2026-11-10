@@ -1,8 +1,8 @@
 //@version=6
 // Option Pulse DAILY ITM SIMULATOR (rebuild) — run on the NSE:NIFTY (or BANKNIFTY) index chart, 1-minute, regular candles.
 // Each day: call strike = day's open rounded DOWN to 100, put strike = rounded UP to 100 (the paid "100-point ITM" method).
-// Both legs are traded with the VWAP-cross rule: buy when a 1-minute candle closes above that option's green line
-// (monthly anchored VWAP of the option), exit when a candle closes below it or at +N points, whichever first.
+// Entry: two consecutive 1-minute closes above that option's green line (monthly VWAP), then a buy-stop at the higher
+// of those two candles' highs, filled when price trades through it. Exit: stop at the OPP Main Trend line or +N points.
 // TradingView strategies can only trade the chart symbol, so this script keeps its own ledger and shows the stats in a table.
 // Limits: only contracts TradingView still has data for (the live expiry), and at most ~20 distinct strikes (40 symbols).
 // This file uses normal indentation: paste it from a laptop, not a phone.
@@ -18,8 +18,9 @@ tradeCE = input.bool(true, "Trade the call", group = grpC)
 tradePE = input.bool(true, "Trade the put", group = grpC)
 grpR = "Rule"
 targetPts = input.float(40, "Target in premium points", minval = 1, step = 5, group = grpR)
+entryRule = input.string("Two closes above + break of their high", "Entry rule", options = ["Two closes above + break of their high", "Single close above (old)"], group = grpR)
 maxEntries = input.int(1, "Max entries per leg per day", minval = 1, group = grpR)
-enterIfAbove = input.bool(true, "Enter at session start if already above the green line", group = grpR)
+enterIfAbove = input.bool(false, "Old rule only: enter at session start if already above the green line", group = grpR)
 entryBuf = input.float(0, "Entry buffer: close must be this many points above the line", minval = 0, step = 1, group = grpR)
 stopSrc = input.string("OPP Main Trend line (blue)", "Stop line", options = ["OPP Main Trend line (blue)", "Green line (VWAP)"], group = grpR)
 stopTrig = input.string("Price goes below (low)", "Stop trigger", options = ["Price goes below (low)", "Close below"], group = grpR)
@@ -99,6 +100,9 @@ canEnter = minsIn >= skipOpenMin and hhmm < noEntryAfterHHMM and hhmm < squareOf
 firstEligible = minsIn >= skipOpenMin and minsIn[1] < skipOpenMin
 ceCross = (ceAbove and not ceAbove[1] and not newDay and not na(ceC[1])) or (enterIfAbove and firstEligible and ceAbove)
 peCross = (peAbove and not peAbove[1] and not newDay and not na(peC[1])) or (enterIfAbove and firstEligible and peAbove)
+twoRule = entryRule == "Two closes above + break of their high"
+ceTwo = ceAbove and ceAbove[1] and not newDay and not newDay[1] and not na(ceC[1])
+peTwo = peAbove and peAbove[1] and not newDay and not newDay[1] and not na(peC[1])
 var int ceEntriesToday = 0
 var int peEntriesToday = 0
 ceEntriesToday := newDay ? 0 : ceEntriesToday
@@ -145,7 +149,19 @@ if ceIn
         exitsVwap += not hitTarget and ceBelow ? 1 : 0
         exitsSquare += not hitTarget and not ceBelow ? 1 : 0
         ceIn := false
-if not ceIn and tradeCE and canEnter and ceCross and ceMtOk and ceOtherOk and ceEntriesToday < maxEntries
+var float cePend = na
+cePend := newDay ? na : cePend
+if not ceIn and not na(cePend) and twoRule
+    if ceH >= cePend and canEnter and ceMtOk and ceOtherOk and ceEntriesToday < maxEntries
+        ceIn := true
+        ceEntry := cePend
+        ceEntriesToday += 1
+        cePend := na
+    else if ceC < ceVw or not canEnter
+        cePend := na
+if not ceIn and twoRule and tradeCE and canEnter and ceTwo and ceEntriesToday < maxEntries
+    cePend := math.max(ceH, ceH[1])
+if not ceIn and not twoRule and tradeCE and canEnter and ceCross and ceMtOk and ceOtherOk and ceEntriesToday < maxEntries
     ceIn := true
     ceEntry := ceC
     ceEntriesToday += 1
@@ -172,7 +188,19 @@ if peIn
         exitsVwap += not hitTargetP and peBelow ? 1 : 0
         exitsSquare += not hitTargetP and not peBelow ? 1 : 0
         peIn := false
-if not peIn and tradePE and canEnter and peCross and peMtOk and peOtherOk and peEntriesToday < maxEntries
+var float pePend = na
+pePend := newDay ? na : pePend
+if not peIn and not na(pePend) and twoRule
+    if peH >= pePend and canEnter and peMtOk and peOtherOk and peEntriesToday < maxEntries
+        peIn := true
+        peEntry := pePend
+        peEntriesToday += 1
+        pePend := na
+    else if peC < peVw or not canEnter
+        pePend := na
+if not peIn and twoRule and tradePE and canEnter and peTwo and peEntriesToday < maxEntries
+    pePend := math.max(peH, peH[1])
+if not peIn and not twoRule and tradePE and canEnter and peCross and peMtOk and peOtherOk and peEntriesToday < maxEntries
     peIn := true
     peEntry := peC
     peEntriesToday += 1
@@ -180,8 +208,8 @@ if not peIn and tradePE and canEnter and peCross and peMtOk and peOtherOk and pe
 // ───────── Output ─────────
 plot(netPnl, "Equity (Rs)", color = color.new(#26a69a, 0), linewidth = 2)
 plot(0, "Zero", color = color.new(#9e9e9e, 60))
-bgcolor(ceIn ? color.new(#26a69a, 90) : na, title = "CE in trade")
-bgcolor(peIn ? color.new(#ef5350, 90) : na, title = "PE in trade")
+bgcolor(ceIn ? color.new(#26a69a, 90) : not na(cePend) ? color.new(#26a69a, 96) : na, title = "CE in trade / pending")
+bgcolor(peIn ? color.new(#ef5350, 90) : not na(pePend) ? color.new(#ef5350, 96) : na, title = "PE in trade / pending")
 pf = grossLoss > 0 ? grossWin / grossLoss : na
 var table tbl = table.new(position.top_right, 2, 12, border_width = 1)
 if barstate.islast
@@ -209,4 +237,4 @@ if barstate.islast
     table.cell(tbl, 0, 10, "Exits: target / stop / square-off", text_size = size.small)
     table.cell(tbl, 1, 10, str.tostring(exitsTarget) + " / " + str.tostring(exitsVwap) + " / " + str.tostring(exitsSquare), text_size = size.small)
     table.cell(tbl, 0, 11, "Rule", text_size = size.small)
-    table.cell(tbl, 1, 11, "buy close > green" + (entryBuf > 0 ? "+" + str.tostring(entryBuf, "#") : "") + ", stop " + (stopSrc == "Green line (VWAP)" ? "green" : "OPP blue") + (stopTrig == "Close below" ? " (close)" : " (touch)") + (exitBuf > 0 ? "-" + str.tostring(exitBuf, "#") : "") + " or +" + str.tostring(targetPts, "#") + " pts, max " + str.tostring(maxEntries) + "/day" + (requireOther ? ", other leg below" : "") + (requireMT ? ", MT blue" : "") + (enterIfAbove ? ", enter if above at start" : ""), text_size = size.small)
+    table.cell(tbl, 1, 11, (twoRule ? "2 closes > green, buy at their high" : "buy close > green") + (entryBuf > 0 ? "+" + str.tostring(entryBuf, "#") : "") + ", stop " + (stopSrc == "Green line (VWAP)" ? "green" : "OPP blue") + (stopTrig == "Close below" ? " (close)" : " (touch)") + (exitBuf > 0 ? "-" + str.tostring(exitBuf, "#") : "") + " or +" + str.tostring(targetPts, "#") + " pts, max " + str.tostring(maxEntries) + "/day" + (requireOther ? ", other leg below" : "") + (requireMT ? ", MT blue" : "") + (enterIfAbove ? ", enter if above at start" : ""), text_size = size.small)
