@@ -16,6 +16,7 @@ The original's formulas are not public. The green zone line is an anchored VWAP 
 
 - `option_pulse_pro.pine` — **overlay replica**. Add it to the option contract's own chart (e.g. `NSE:NIFTY261117C24900`, 1-minute), exactly like the original. Components, matched to the paid indicator's behaviour: Institutional Breakout Zone = anchored VWAP (green, anchored to the first bar of the contract's loaded data, which matched the paid line to within 0.1), Main Trend - ITM = volume-weighted band: elastic VWMA(62) of hlc3 ± 2 × ATR(14), lower band shown while bullish (blue), upper while bearish (pink), flipping when close crosses it, Running Trend - Pullback Zone = EMA 9/21 cloud, optional Today's High/Low, background colour. It auto-detects the opposite leg (same strike and expiry, CE↔PE), follows Heikin Ashi if the chart uses it, and shows the combined CE/PE state with futures OI in a small table.
 - `option_pulse_dashboard.pine` — **one-pane dashboard**. Add it to the index chart (`NSE:NIFTY`) or to any option chart of it; it picks the ATM CE and PE for the current expiry and shows both premiums, their zones, OI and the state.
+- `option_pulse_strategy.pine` — **backtest strategy** with the same engine, fixed risk:reward (default 1:3), stop at the Main Trend line, optional flip exit and intraday square-off. Long-only on option charts (buys the option when its own trend turns and the CE/PE state agrees); long and short on futures/stocks/commodities (long = "buy CE", short = "buy PE"). This file uses normal indentation, so paste it from a laptop.
 - `tests/oi_probe.pine` — tiny check: does TradingView expose open interest for an NSE option contract? (The dashboard's "Option OI" row answers the same question.)
 
 All scripts have **no indented lines** on purpose: Android browsers re-indent pasted lines, which breaks normal Pine code.
@@ -42,6 +43,13 @@ Pine gets OI through a synthetic `<symbol>_OI` series. Tested 9 Nov 2026: availa
 ## Alerts
 
 Both scripts expose alert conditions (Long setup, Short setup, Premium decay, Any state change; the overlay also has Main Trend turned bullish/bearish). Create them from the chart's Alert dialog by choosing the indicator as the condition.
+
+## Backtesting
+
+1. Pine Editor → paste `option_pulse_strategy.pine` → Add to chart → open the **Strategy Tester** tab at the bottom.
+2. On an option chart the test covers that contract's life only (a few weeks): there is no multi-year option history on TradingView.
+3. For a multi-year test use **NSE:NIFTY1!** (continuous futures) on 1-minute, set the From date, and turn on **Deep Backtesting** in the Strategy Tester (Premium plan). Long trades stand in for "buy CE", short trades for "buy PE".
+4. Defaults: 1 lot (75), R:R 1:3, entry on the Main Trend flip, exit on stop / target / opposite flip, no entries in the first 15 minutes, square-off 15:20.
 
 ## Other markets (crude, gold, silver, stocks, futures)
 

@@ -1,0 +1,151 @@
+//@version=6
+// Option Pulse Pro Strategy (rebuild) — backtest of the Option Pulse logic with a fixed risk:reward.
+// Same engine as option_pulse_pro.pine: Institutional VWAP, Main Trend (EVWMA ± 2·ATR band), Running line + wedge.
+//
+// On an OPTION chart (e.g. NSE:NIFTY261117C24900): long-only. Buys this option when its own Main Trend turns bullish
+//   AND the CE/PE pair state agrees (CE above VWAP & PE below for a CE; the mirror for a PE), with optional futures OI.
+// On FUTURES / STOCK / COMMODITY charts (e.g. NSE:NIFTY1!, MCX:CRUDEOIL1!): long and short. Long = "buy CE",
+//   short = "buy PE". Use TradingView's Deep Backtesting on NSE:NIFTY1! 1-minute for a multi-year test.
+//
+// Entry: Main Trend flip (default) or pullback re-entry (close crosses back over the running line inside the trend).
+// Stop: the Main Trend line at entry. Target: risk × R:R (default 1:3). Optional exit on opposite flip and intraday square-off.
+// This file uses normal indentation: paste it from a laptop, not a phone.
+strategy("Option Pulse Pro Strategy (rebuild)", shorttitle = "OPP-S", overlay = true, scale = scale.right, initial_capital = 200000, default_qty_type = strategy.fixed, default_qty_value = 1, commission_type = strategy.commission.cash_per_order, commission_value = 0, process_orders_on_close = true, pyramiding = 0, max_bars_back = 1000)
+
+// ───────── Inputs ─────────
+grpB = "Backtest"
+fromDate = input.time(timestamp("2022-11-01 00:00 +0530"), "From", group = grpB)
+toDate = input.time(timestamp("2030-12-31 00:00 +0530"), "To", group = grpB)
+lotSize = input.int(75, "Quantity per trade (NIFTY lot = 75)", minval = 1, group = grpB)
+rr = input.float(3.0, "Risk : Reward (target = risk × this)", minval = 0.5, step = 0.5, group = grpB)
+entryMode = input.string("Main Trend flip", "Entry", options = ["Main Trend flip", "Pullback re-entry"], group = grpB)
+exitOnFlip = input.bool(true, "Also exit when Main Trend flips against the trade", group = grpB)
+useFutOI = input.bool(true, "Require futures OI confirmation (ignored when OI data is missing)", group = grpB)
+grpS = "Session filter (IST)"
+skipOpenMin = input.int(15, "No entries in the first N minutes of the session", minval = 0, group = grpS)
+squareOff = input.bool(true, "Intraday square-off", group = grpS)
+squareOffHHMM = input.int(1520, "Square-off time (HHMM, no new entries after)", minval = 0, maxval = 2359, group = grpS)
+grpM = "Engine (same defaults as the overlay)"
+instAnchor = input.string("Auto", "VWAP anchor", options = ["Auto", "Contract", "Session", "Week", "Month"], group = grpM)
+mtLen = input.int(62, "Main Trend length (elastic VWMA of hlc3)", minval = 1, group = grpM)
+mtAtr = input.int(14, "Main Trend ATR period", minval = 1, group = grpM)
+mtFactor = input.float(2.0, "Main Trend ATR factor", minval = 0.1, step = 0.1, group = grpM)
+runFast = input.int(9, "Running Trend EMA length", minval = 1, group = grpM)
+oiLookback = input.int(5, "OI / price change lookback (bars)", minval = 1, group = grpM)
+futSuffix = input.string("1!", "Futures contract suffix", group = grpM)
+autoPair = input.bool(true, "Auto-detect opposite leg on option charts", group = grpM)
+manPartner = input.string("", "Manual opposite-leg symbol (overrides)", group = grpM)
+
+// ───────── Helpers ─────────
+oiClass(float p, float oi) => na(p - p[oiLookback]) or na(oi - oi[oiLookback]) ? "n/a" : p > p[oiLookback] and oi > oi[oiLookback] ? "Long buildup" : p > p[oiLookback] and oi < oi[oiLookback] ? "Short covering" : p < p[oiLookback] and oi > oi[oiLookback] ? "Short buildup" : p < p[oiLookback] and oi < oi[oiLookback] ? "Long unwinding" : "Flat"
+posLine(float c, float l) => na(c) or na(l) ? 0 : c > l ? 1 : c < l ? -1 : 0
+
+// ───────── Symbol parsing ─────────
+TZ = "Asia/Kolkata"
+tkRaw = str.upper(syminfo.ticker)
+stdId = ticker.standard(syminfo.tickerid)
+isHA = str.contains(syminfo.tickerid, "HeikenAshi")
+optMatchRaw = str.match(tkRaw, "\\d{6}[CP]\\d+$")
+optPart = na(optMatchRaw) ? "" : optMatchRaw
+isOpt = str.length(optPart) > 7
+optRoot = isOpt ? str.substring(tkRaw, 0, str.length(tkRaw) - str.length(optPart)) : ""
+optExp = isOpt ? str.substring(optPart, 0, 6) : ""
+optType = isOpt ? str.substring(optPart, 6, 7) : ""
+optStrike = isOpt ? str.substring(optPart, 7) : ""
+partnerType = optType == "C" ? "P" : "C"
+autoPartner = isOpt ? syminfo.prefix + ":" + optRoot + optExp + partnerType + optStrike : stdId
+partnerSym = manPartner != "" ? manPartner : autoPair ? autoPartner : stdId
+partnerReq = isHA ? ticker.heikinashi(partnerSym) : partnerSym
+hasPartner = manPartner != "" or (autoPair and isOpt)
+autoRoot = str.contains(tkRaw, "BANKNIFTY") ? "BANKNIFTY" : str.contains(tkRaw, "FINNIFTY") ? "FINNIFTY" : str.contains(tkRaw, "MIDCPNIFTY") ? "MIDCPNIFTY" : str.contains(tkRaw, "SENSEX") ? "SENSEX" : str.contains(tkRaw, "NIFTY") ? "NIFTY" : tkRaw
+root = isOpt ? optRoot : autoRoot
+isFutChart = str.contains(tkRaw, "!")
+futSym = isFutChart ? stdId : syminfo.prefix + ":" + root + futSuffix
+thisIsCE = optType != "P"
+
+// ───────── Engine: this chart ─────────
+newDay = timeframe.change("1D")
+anchorUse = instAnchor == "Auto" ? (isOpt ? "Contract" : "Session") : instAnchor
+anchorNow = anchorUse == "Contract" ? bar_index == 0 : anchorUse == "Session" ? newDay : anchorUse == "Week" ? timeframe.change("1W") : timeframe.change("1M")
+inst = ta.vwap(hlc3, anchorNow)
+hasVol = not na(volume) and ta.cum(nz(volume)) > 0
+vSum = math.sum(nz(volume), mtLen)
+emaCen = ta.ema(hlc3, mtLen)
+var float vwCen = na
+vwCen := na(vwCen[1]) ? hlc3 : vSum > 0 ? vwCen[1] * (vSum - nz(volume)) / vSum + nz(volume) * hlc3 / vSum : vwCen[1]
+mtCen = hasVol ? vwCen : emaCen
+mtAtrV = ta.atr(mtAtr)
+mtUp = mtCen + mtFactor * mtAtrV
+mtLo = mtCen - mtFactor * mtAtrV
+var int mtDir = 1
+mtDir := nz(mtDir[1], 1) == 1 and close > mtUp ? -1 : nz(mtDir[1], 1) == -1 and close < mtLo ? 1 : nz(mtDir[1], 1)
+stLine = mtDir == -1 ? mtLo : mtUp
+runF = ta.ema(close, runFast)
+thisPos = posLine(close, inst)
+
+// ───────── Engine: opposite leg (option charts) ─────────
+[pC, pInst] = request.security(partnerReq, timeframe.period, [close, ta.vwap(hlc3, anchorNow)], ignore_invalid_symbol = true)
+partnerPos = hasPartner ? posLine(pC, pInst) : 0
+
+// ───────── Futures OI ─────────
+futC = request.security(futSym, timeframe.period, close, ignore_invalid_symbol = true)
+futOI = request.security(futSym + "_OI", timeframe.period, close, ignore_invalid_symbol = true)
+futClass = oiClass(futC, futOI)
+oiMissing = na(futOI)
+bullOI = not useFutOI or oiMissing or futClass == "Long buildup" or futClass == "Short covering"
+bearOI = not useFutOI or oiMissing or futClass == "Short buildup" or futClass == "Long unwinding"
+
+// ───────── Setup state ─────────
+cePos = isOpt ? (thisIsCE ? thisPos : partnerPos) : thisPos
+pePos = isOpt ? (thisIsCE ? partnerPos : thisPos) : -thisPos
+longSetup = cePos == 1 and pePos == -1 and bullOI
+shortSetup = pePos == 1 and cePos == -1 and bearOI
+// On an option chart we only ever BUY this option: a CE wants the long setup, a PE wants the short setup.
+legBull = isOpt ? (thisIsCE ? longSetup : shortSetup) : longSetup
+legBear = isOpt ? false : shortSetup
+
+// ───────── Timing ─────────
+var int sessStart = na
+sessStart := newDay ? time : sessStart
+minsIn = na(sessStart) ? 999 : (time - sessStart) / 60000
+hhmm = hour(time, TZ) * 100 + minute(time, TZ)
+afterSquareOff = squareOff and hhmm >= squareOffHHMM
+inRange = time >= fromDate and time <= toDate
+canEnter = inRange and minsIn >= skipOpenMin and not afterSquareOff and barstate.isconfirmed
+
+// ───────── Signals ─────────
+flipBull = mtDir == -1 and mtDir[1] == 1
+flipBear = mtDir == 1 and mtDir[1] == -1
+pbBull = mtDir == -1 and ta.crossover(close, runF)
+pbBear = mtDir == 1 and ta.crossunder(close, runF)
+sigLong = legBull and (entryMode == "Main Trend flip" ? flipBull : pbBull)
+sigShort = legBear and (entryMode == "Main Trend flip" ? flipBear : pbBear)
+
+// ───────── Orders ─────────
+var float stopPx = na
+var float targetPx = na
+if canEnter and strategy.position_size == 0 and sigLong and close > stLine
+    stopPx := stLine
+    targetPx := close + rr * (close - stLine)
+    strategy.entry("L", strategy.long, qty = lotSize)
+    strategy.exit("L-exit", from_entry = "L", stop = stopPx, limit = targetPx)
+if canEnter and strategy.position_size == 0 and sigShort and close < stLine
+    stopPx := stLine
+    targetPx := close - rr * (stLine - close)
+    strategy.entry("S", strategy.short, qty = lotSize)
+    strategy.exit("S-exit", from_entry = "S", stop = stopPx, limit = targetPx)
+if exitOnFlip and strategy.position_size > 0 and flipBear
+    strategy.close("L", comment = "flip")
+if exitOnFlip and strategy.position_size < 0 and flipBull
+    strategy.close("S", comment = "flip")
+if afterSquareOff and strategy.position_size != 0
+    strategy.close_all(comment = "square-off")
+
+// ───────── Drawing ─────────
+plot(inst, "Institutional Breakout Zone", color = color.new(#43a047, 0), linewidth = 2)
+plMain = plot(stLine, "Main Trend - ITM", color = mtDir < 0 ? color.new(#1e88e5, 0) : color.new(#ec407a, 0), linewidth = 2, style = plot.style_linebr)
+plRun = plot(runF, "Running Trend", color = mtDir < 0 ? color.new(#26a69a, 30) : color.new(#ef5350, 30), linewidth = 1)
+fill(plMain, plRun, color = mtDir < 0 ? color.new(#26a69a, 85) : color.new(#ef5350, 85), title = "Pullback wedge")
+plot(strategy.position_size != 0 ? stopPx : na, "Stop", color = color.new(#ef5350, 0), style = plot.style_linebr)
+plot(strategy.position_size != 0 ? targetPx : na, "Target", color = color.new(#26a69a, 0), style = plot.style_linebr)
+bgcolor(isOpt ? (legBull ? color.new(#26a69a, 92) : na) : (longSetup ? color.new(#26a69a, 92) : shortSetup ? color.new(#ef5350, 92) : na), title = "Setup state")
