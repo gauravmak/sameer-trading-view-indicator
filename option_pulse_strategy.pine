@@ -29,7 +29,7 @@ skipOpenMin = input.int(15, "No entries in the first N minutes of the session", 
 squareOff = input.bool(true, "Intraday square-off", group = grpS)
 squareOffHHMM = input.int(1520, "Square-off time (HHMM, no new entries after)", minval = 0, maxval = 2359, group = grpS)
 grpM = "Engine (same defaults as the overlay)"
-instAnchor = input.string("Auto", "VWAP anchor", options = ["Auto", "Contract", "Session", "Week", "Month"], group = grpM)
+instAnchor = input.string("Contract", "VWAP anchor", options = ["Contract", "Session", "Week", "Month"], group = grpM)
 mtLen = input.int(62, "Main Trend length (elastic VWMA of hlc3)", minval = 1, group = grpM)
 mtAtr = input.int(14, "Main Trend ATR period", minval = 1, group = grpM)
 mtFactor = input.float(2.0, "Main Trend ATR factor", minval = 0.1, step = 0.1, group = grpM)
@@ -68,7 +68,7 @@ thisIsCE = optType != "P"
 
 // ───────── Engine: this chart ─────────
 newDay = timeframe.change("1D")
-anchorUse = instAnchor == "Auto" ? (isOpt ? "Contract" : "Session") : instAnchor
+anchorUse = instAnchor
 anchorNow = anchorUse == "Contract" ? bar_index == 0 : anchorUse == "Session" ? newDay : anchorUse == "Week" ? timeframe.change("1W") : timeframe.change("1M")
 inst = ta.vwap(hlc3, anchorNow)
 hasVol = not na(volume) and ta.cum(nz(volume)) > 0

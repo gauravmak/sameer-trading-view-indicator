@@ -66,7 +66,7 @@ Max drawdown 25–30% in every run; buy and hold made +7.5 lakh over the same pe
 
 ## Other markets (crude, gold, silver, stocks, futures)
 
-The overlay's three drawings need only price and volume, so it works on any symbol and timeframe. On an option contract it also pairs the opposite leg and fills the CE/PE table; on anything else the table shows only this chart and the state reads ABOVE / BELOW / INSIDE ZONE. The VWAP anchor is automatic: first loaded bar on option contracts, session on everything else. Symbols without volume (e.g. a spot index) fall back to a plain EMA centre for the Main Trend. On a futures chart (`MCX:CRUDEOIL1!`) the OI row reads that contract's own OI. Lengths were fitted on Nifty options; other markets may want different lengths.
+The overlay's three drawings need only price and volume, so it works on any symbol and timeframe. On an option contract it also pairs the opposite leg and fills the CE/PE table; on anything else the table shows only this chart and the state reads ABOVE / BELOW / INSIDE ZONE. The VWAP anchors to the first bar of loaded history on every symbol, which is what the paid indicator does too (checked on GIFT Nifty futures: its line sat at the two-month average, not the session VWAP). Session, week and month anchors are available in Settings. Symbols without volume (e.g. a spot index) fall back to a plain EMA centre for the Main Trend. On a futures chart (`MCX:CRUDEOIL1!`) the OI row reads that contract's own OI. Lengths were fitted on Nifty options; other markets may want different lengths.
 
 ## Known gaps vs. the original
 
