@@ -60,7 +60,8 @@ hasPartner = manPartner != "" or isOpt
 
 // ───────── Engine: this chart ─────────
 newDay = timeframe.change("1D")
-inst = ta.vwap(hlc3, timeframe.change("1M"))
+anchorNow = bar_index == 0 or timeframe.change("1M")
+inst = ta.vwap(hlc3, anchorNow)
 hasVol = not na(volume) and ta.cum(nz(volume)) > 0
 vSum = math.sum(nz(volume), mtLen)
 emaCen = ta.ema(hlc3, mtLen)
@@ -76,7 +77,7 @@ stLine = mtDir == -1 ? mtLo : mtUp
 runF = ta.ema(close, runFast)
 
 // ───────── Engine: opposite leg ─────────
-[pC, pH, pL, pV, pInst] = request.security(partnerReq, timeframe.period, [close, high, low, volume, ta.vwap(hlc3, timeframe.change("1M"))], ignore_invalid_symbol = true)
+[pC, pH, pL, pV, pInst] = request.security(partnerReq, timeframe.period, [close, high, low, volume, ta.vwap(hlc3, anchorNow)], ignore_invalid_symbol = true)
 pVsum = math.sum(nz(pV), mtLen)
 pHLC3 = (pH + pL + pC) / 3
 var float pCen = na

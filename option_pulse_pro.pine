@@ -79,7 +79,7 @@ futSym = isFutChart ? stdId : syminfo.prefix + ":" + root + futSuffix
 // ───────── This leg ─────────
 newDay = timeframe.change("1D")
 anchorUse = instAnchor
-anchorNow = anchorUse == "Contract" ? bar_index == 0 : anchorUse == "Session" ? newDay : anchorUse == "Week" ? timeframe.change("1W") : timeframe.change("1M")
+anchorNow = bar_index == 0 or (anchorUse == "Contract" ? false : anchorUse == "Session" ? newDay : anchorUse == "Week" ? timeframe.change("1W") : timeframe.change("1M"))
 inst = ta.vwap(hlc3, anchorNow)
 hasVol = not na(volume) and ta.cum(nz(volume)) > 0
 vSum = math.sum(nz(volume), mtLen)
@@ -179,7 +179,7 @@ hb = showTable ? hdrBg : hide
 tc = showTable ? txtC : hide
 thisName = isOpt ? (thisIsCE ? "CE (this chart)" : "PE (this chart)") : "This chart"
 partnerName = isOpt ? (thisIsCE ? "PE (other leg)" : "CE (other leg)") : "Other leg"
-table.cell(dash, 0, 0, showTable ? "Option Pulse Pro v1.9" : "", text_color = tc, bgcolor = hb, text_size = size.small)
+table.cell(dash, 0, 0, showTable ? "Option Pulse Pro v2.0" : "", text_color = tc, bgcolor = hb, text_size = size.small)
 table.cell(dash, 1, 0, showTable ? thisName : "", text_color = tc, bgcolor = hb, text_size = size.small)
 table.cell(dash, 2, 0, showTable ? partnerName : "", text_color = tc, bgcolor = hb, text_size = size.small)
 table.cell(dash, 0, 1, showTable ? "Symbol" : "", text_color = tc, bgcolor = cb, text_size = size.small)

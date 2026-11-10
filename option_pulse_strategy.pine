@@ -72,7 +72,7 @@ thisIsCE = optType != "P"
 // ───────── Engine: this chart ─────────
 newDay = timeframe.change("1D")
 anchorUse = instAnchor
-anchorNow = anchorUse == "Contract" ? bar_index == 0 : anchorUse == "Session" ? newDay : anchorUse == "Week" ? timeframe.change("1W") : timeframe.change("1M")
+anchorNow = bar_index == 0 or (anchorUse == "Contract" ? false : anchorUse == "Session" ? newDay : anchorUse == "Week" ? timeframe.change("1W") : timeframe.change("1M"))
 inst = ta.vwap(hlc3, anchorNow)
 hasVol = not na(volume) and ta.cum(nz(volume)) > 0
 vSum = math.sum(nz(volume), mtLen)
