@@ -20,7 +20,7 @@ lotSize = input.int(75, "Quantity per trade (NIFTY lot = 75)", minval = 1, group
 rr = input.float(3.0, "Risk : Reward (target = risk × this)", minval = 0.5, step = 0.5, group = grpB)
 entryMode = input.string("Main Trend flip", "Entry", options = ["Main Trend flip", "Pullback re-entry"], group = grpB)
 exitOnFlip = input.bool(true, "Also exit when Main Trend flips against the trade", group = grpB)
-useFutOI = input.bool(true, "Require futures OI confirmation (ignored when OI data is missing)", group = grpB)
+useFutOI = input.bool(false, "Require futures OI confirmation (Flat / missing OI counts as neutral)", group = grpB)
 grpS = "Session filter (IST)"
 skipOpenMin = input.int(15, "No entries in the first N minutes of the session", minval = 0, group = grpS)
 squareOff = input.bool(true, "Intraday square-off", group = grpS)
@@ -92,8 +92,8 @@ futC = request.security(futSym, timeframe.period, close, ignore_invalid_symbol =
 futOI = request.security(futSym + "_OI", timeframe.period, close, ignore_invalid_symbol = true)
 futClass = oiClass(futC, futOI)
 oiMissing = na(futOI)
-bullOI = not useFutOI or oiMissing or futClass == "Long buildup" or futClass == "Short covering"
-bearOI = not useFutOI or oiMissing or futClass == "Short buildup" or futClass == "Long unwinding"
+bullOI = not useFutOI or oiMissing or futClass == "Long buildup" or futClass == "Short covering" or futClass == "Flat" or futClass == "n/a"
+bearOI = not useFutOI or oiMissing or futClass == "Short buildup" or futClass == "Long unwinding" or futClass == "Flat" or futClass == "n/a"
 
 // ───────── Setup state ─────────
 cePos = isOpt ? (thisIsCE ? thisPos : partnerPos) : thisPos
@@ -140,6 +140,28 @@ if exitOnFlip and strategy.position_size < 0 and flipBull
     strategy.close("S", comment = "flip")
 if afterSquareOff and strategy.position_size != 0
     strategy.close_all(comment = "square-off")
+
+// ───────── Diagnostics ─────────
+var int nFlips = 0
+var int nSigs = 0
+nFlips += (flipBull or flipBear) and inRange ? 1 : 0
+nSigs += (sigLong or sigShort) and inRange ? 1 : 0
+var table diag = table.new(position.top_right, 2, 7, border_width = 1)
+if barstate.islast
+    table.cell(diag, 0, 0, "OPP Strategy", text_color = color.white, bgcolor = color.new(#263238, 0), text_size = size.small)
+    table.cell(diag, 1, 0, isOpt ? (thisIsCE ? "CE chart" : "PE chart") : "Futures/stock chart", text_color = color.white, bgcolor = color.new(#263238, 0), text_size = size.small)
+    table.cell(diag, 0, 1, "Bars in range", text_size = size.small)
+    table.cell(diag, 1, 1, str.tostring(ta.cum(inRange ? 1 : 0), "#"), text_size = size.small)
+    table.cell(diag, 0, 2, "Main Trend flips", text_size = size.small)
+    table.cell(diag, 1, 2, str.tostring(nFlips), text_size = size.small)
+    table.cell(diag, 0, 3, "Entry signals", text_size = size.small)
+    table.cell(diag, 1, 3, str.tostring(nSigs), text_size = size.small)
+    table.cell(diag, 0, 4, "Trades taken", text_size = size.small)
+    table.cell(diag, 1, 4, str.tostring(strategy.closedtrades + strategy.opentrades), text_size = size.small)
+    table.cell(diag, 0, 5, "Futures OI", text_size = size.small)
+    table.cell(diag, 1, 5, futSym + " " + (oiMissing ? "missing" : futClass), text_size = size.small)
+    table.cell(diag, 0, 6, "Volume on chart", text_size = size.small)
+    table.cell(diag, 1, 6, hasVol ? "yes" : "no (EMA fallback)", text_size = size.small)
 
 // ───────── Drawing ─────────
 plot(inst, "Institutional Breakout Zone", color = color.new(#43a047, 0), linewidth = 2)
