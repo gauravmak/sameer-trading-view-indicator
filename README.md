@@ -10,11 +10,11 @@ The original reads the **ATM call (CE) and put (PE) premiums against a "zone"** 
 | SHORT SETUP | below zone | above zone | long unwinding / short buildup |
 | PREMIUM DECAY (avoid) | below zone | below zone | no long buildup |
 
-The original's formulas are not public. The green zone line is an anchored VWAP (matched to 0.05). The blue/pink Main Trend was fitted against the paid indicator's exported values: a volume-weighted centre (elastic VWMA) ± ATR band, reproducing 5 of 6 flips to the minute with a mean error of about 2 points. The cloud is a fast EMA pair. Every length is an input.
+The original's formulas are not public. The green zone line is an anchored VWAP (matched to 0.05). The blue/pink Main Trend was fitted against the paid indicator's exported values: a volume-weighted centre (elastic VWMA) ± 2 × ATR(14) band. Fitted jointly on CE and PE exports with volume: mean error about 2 points (under 1% of premium), flips on the same minutes. The cloud is a fast EMA pair. Every length is an input.
 
 ## Files
 
-- `option_pulse_pro.pine` — **overlay replica**. Add it to the option contract's own chart (e.g. `NSE:NIFTY261117C24900`, 1-minute), exactly like the original. Components, matched to the paid indicator's behaviour: Institutional Breakout Zone = anchored VWAP (green, anchored to the first bar of the contract's loaded data, which matched the paid line to within 0.1), Main Trend - ITM = volume-weighted band: elastic VWMA(65) ± 2 × ATR(14), lower band shown while bullish (blue), upper while bearish (pink), flipping when close crosses it, Running Trend - Pullback Zone = EMA 9/21 cloud, optional Today's High/Low, background colour. It auto-detects the opposite leg (same strike and expiry, CE↔PE), follows Heikin Ashi if the chart uses it, and shows the combined CE/PE state with futures OI in a small table.
+- `option_pulse_pro.pine` — **overlay replica**. Add it to the option contract's own chart (e.g. `NSE:NIFTY261117C24900`, 1-minute), exactly like the original. Components, matched to the paid indicator's behaviour: Institutional Breakout Zone = anchored VWAP (green, anchored to the first bar of the contract's loaded data, which matched the paid line to within 0.1), Main Trend - ITM = volume-weighted band: elastic VWMA(62) of hlc3 ± 2 × ATR(14), lower band shown while bullish (blue), upper while bearish (pink), flipping when close crosses it, Running Trend - Pullback Zone = EMA 9/21 cloud, optional Today's High/Low, background colour. It auto-detects the opposite leg (same strike and expiry, CE↔PE), follows Heikin Ashi if the chart uses it, and shows the combined CE/PE state with futures OI in a small table.
 - `option_pulse_dashboard.pine` — **one-pane dashboard**. Add it to the index chart (`NSE:NIFTY`) or to any option chart of it; it picks the ATM CE and PE for the current expiry and shows both premiums, their zones, OI and the state.
 - `tests/oi_probe.pine` — tiny check: does TradingView expose open interest for an NSE option contract? (The dashboard's "Option OI" row answers the same question.)
 
@@ -45,7 +45,7 @@ Both scripts expose alert conditions (Long setup, Short setup, Premium decay, An
 
 ## Known gaps vs. the original
 
-- Main Trend parameters (EVWMA 65, ATR 14, factor 2) were fitted from an export without a volume column, so volume was reconstructed from the VWAP series; a re-export with volume will refine them. EMA 9/21 for the cloud is by eye. Compare the overlay with the paid one on the same chart and tune in Settings until the lines sit on top of each other.
+- Main Trend parameters (EVWMA 62, ATR 14, factor 2.0) are fitted on 9 Nov CE and PE data with volume; the factor came out at exactly 2.000 on both legs. The cloud's EMA 9/21 is by eye, since the paid cloud lines are not exportable. Compare the overlay with the paid one on the same chart and tune in Settings until the lines sit on top of each other.
 - The VWAP anchors to the first loaded bar. For a weekly option the loaded 1-minute history covers the contract's whole life on paid plans, so this is stable; on the free plan with less history it will differ.
 - MCX Gold/Crude options: symbol format on TradingView not verified; use manual symbols.
 - Needs real-time NSE data on TradingView (delayed data = 15-minute-late signals on a 1-minute chart).

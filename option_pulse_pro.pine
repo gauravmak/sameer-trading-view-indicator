@@ -5,7 +5,7 @@
 //                                  (this matched the paid indicator to within 0.1 on 9 Nov 2026)
 //   Main Trend - ITM             = volume-weighted centre (elastic VWMA) ± factor × ATR, shown as the lower band while
 //                                  bullish (blue) and the upper band while bearish (pink); flips when close crosses it.
-//                                  Fitted to the paid indicator's exported values on 9 Nov 2026 (EVWMA 65, ATR 14, factor 2).
+//                                  Fitted to the paid indicator's exported CE and PE values with volume (EVWMA 62 of hlc3, ATR 14, factor 2.0).
 //   Running Trend - Pullback Zone = fast EMA pair with cloud (green when fast > slow, pink otherwise)
 //   Today's High/Low lines (optional), background colour
 // Extra: finds the opposite leg (same strike & expiry, CE<->PE) and shows the combined CE/PE state with futures OI.
@@ -17,7 +17,7 @@ grpM = "Main settings"
 showInst = input.bool(true, "Institutional Breakout Zone (anchored VWAP)", group = grpM)
 instAnchor = input.string("Contract", "VWAP anchor", options = ["Contract", "Session", "Week", "Month"], group = grpM)
 showMain = input.bool(true, "Main Trend - ITM (volume-weighted band)", group = grpM)
-mtLen = input.int(65, "Main Trend length (elastic VWMA)", minval = 1, group = grpM)
+mtLen = input.int(62, "Main Trend length (elastic VWMA of hlc3)", minval = 1, group = grpM)
 mtAtr = input.int(14, "Main Trend ATR period", minval = 1, group = grpM)
 mtFactor = input.float(2.0, "Main Trend ATR factor", minval = 0.1, step = 0.1, group = grpM)
 showRun = input.bool(true, "Running Trend - Pullback Zone (EMA pair + cloud)", group = grpM)
@@ -73,7 +73,7 @@ anchorNow = instAnchor == "Contract" ? bar_index == 0 : instAnchor == "Session" 
 inst = ta.vwap(hlc3, anchorNow)
 vSum = math.sum(volume, mtLen)
 var float mtCen = na
-mtCen := na(mtCen[1]) ? close : vSum > 0 ? mtCen[1] * (vSum - volume) / vSum + volume * close / vSum : mtCen[1]
+mtCen := na(mtCen[1]) ? hlc3 : vSum > 0 ? mtCen[1] * (vSum - volume) / vSum + volume * hlc3 / vSum : mtCen[1]
 mtAtrV = ta.atr(mtAtr)
 mtUp = mtCen + mtFactor * mtAtrV
 mtLo = mtCen - mtFactor * mtAtrV
@@ -94,7 +94,8 @@ thisPos = zoneRef == "Institutional VWAP" ? posLine(close, inst) : zoneRef == "M
 [pC, pH, pL, pV, pInst, pRunF, pRunS] = request.security(partnerReq, timeframe.period, [close, high, low, volume, ta.vwap(hlc3, anchorNow), ta.ema(close, runFast), ta.ema(close, runSlow)], ignore_invalid_symbol = true)
 pVsum = math.sum(nz(pV), mtLen)
 var float pCen = na
-pCen := na(pCen[1]) ? pC : pVsum > 0 ? pCen[1] * (pVsum - nz(pV)) / pVsum + nz(pV) * pC / pVsum : pCen[1]
+pHLC3 = (pH + pL + pC) / 3
+pCen := na(pCen[1]) ? pHLC3 : pVsum > 0 ? pCen[1] * (pVsum - nz(pV)) / pVsum + nz(pV) * pHLC3 / pVsum : pCen[1]
 pTR = math.max(pH - pL, math.abs(pH - nz(pC[1], pC)), math.abs(pL - nz(pC[1], pC)))
 pAtrV = ta.rma(pTR, mtAtr)
 pUp = pCen + mtFactor * pAtrV
