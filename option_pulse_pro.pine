@@ -25,6 +25,7 @@ showRun = input.bool(true, "Running Trend - Pullback Zone (running line + wedge)
 runFast = input.int(9, "Running Trend EMA length", minval = 1, group = grpM)
 showPair = input.bool(false, "Extra: second EMA with small cloud (not in the original)", group = grpM)
 runSlow = input.int(21, "Extra: second EMA length", minval = 1, group = grpM)
+showPZ = input.bool(false, "Pullback Zone (Less Accurate) background", group = grpM, tooltip = "Background tint: pink while price is below the running line in a bearish Main Trend, green while above it in a bullish one.")
 showHL = input.bool(false, "Today's High/Low lines", group = grpM)
 zoneRef = input.string("Institutional VWAP", "Above/below zone is judged against", options = ["Institutional VWAP", "Main Trend", "Running Trend cloud"], group = grpM)
 grpP = "Opposite leg"
@@ -136,7 +137,9 @@ fill(plMain, plWedge, color = showRun and showMain ? (stDir < 0 ? color.new(#26a
 fill(plRunF, plRunS, color = showPair ? (runUp ? color.new(#26a69a, 70) : color.new(#ef5350, 70)) : na, title = "Extra EMA cloud")
 plot(showHL ? dayH : na, "Today's high", color = color.new(#ffb300, 0), style = plot.style_stepline)
 plot(showHL ? dayL : na, "Today's low", color = color.new(#ffb300, 0), style = plot.style_stepline)
-bgcolor(showBg ? (thisPos == 1 ? color.new(#26a69a, 88) : thisPos == -1 ? color.new(#ef5350, 88) : na) : na, title = "Background")
+bgcolor(showBg ? (thisPos == 1 ? color.new(#26a69a, 88) : thisPos == -1 ? color.new(#ef5350, 88) : na) : na, title = "Background by zone")
+pzCol = stDir > 0 and close < runF ? color.new(#ef5350, 90) : stDir < 0 and close > runF ? color.new(#26a69a, 90) : na
+bgcolor(showPZ ? pzCol : na, title = "Pullback Zone (Less Accurate)")
 var label lb = label.new(bar_index, high, "", style = label.style_label_left, textcolor = color.white, color = stateCol, size = size.small)
 label.set_xy(lb, bar_index, high)
 label.set_text(lb, showLabel ? (isOpt ? (thisIsCE ? "CE " : "PE ") : "") + posText(thisPos) + "\n" + state : "")
@@ -155,7 +158,7 @@ hb = showTable ? hdrBg : hide
 tc = showTable ? txtC : hide
 thisName = isOpt ? (thisIsCE ? "CE (this chart)" : "PE (this chart)") : "This chart"
 partnerName = isOpt ? (thisIsCE ? "PE (other leg)" : "CE (other leg)") : "Other leg"
-table.cell(dash, 0, 0, showTable ? "Option Pulse Pro v1.3" : "", text_color = tc, bgcolor = hb, text_size = size.small)
+table.cell(dash, 0, 0, showTable ? "Option Pulse Pro v1.4" : "", text_color = tc, bgcolor = hb, text_size = size.small)
 table.cell(dash, 1, 0, showTable ? thisName : "", text_color = tc, bgcolor = hb, text_size = size.small)
 table.cell(dash, 2, 0, showTable ? partnerName : "", text_color = tc, bgcolor = hb, text_size = size.small)
 table.cell(dash, 0, 1, showTable ? "Symbol" : "", text_color = tc, bgcolor = cb, text_size = size.small)
